@@ -36,7 +36,7 @@ m_package = Package(name='python_workflow_definition')
 class PythonWorkflowDefinitionValue(ArchiveSection):
     """
     Section representing a workflow value (input, output, or intermediate).
-    
+
     This section stores actual values from the workflow definition and provides
     a section reference for workflow connections.
     """
@@ -360,17 +360,17 @@ class PythonWorkflowDefinition(Workflow):
         """
         Create NOMAD workflow structure (tasks, inputs, outputs) from the
         Python workflow definition.
-        
+
         This method creates proper Link connections between tasks based on edges,
         storing values in dedicated sections that can be referenced.
         """
         # Step 1: Create value sections for all nodes
         node_id_to_value_section = {}
-        
+
         for node in nodes:
             node_id = node.get('id')
             node_type = node.get('type')
-            
+
             # Create a value section for each node
             value_section = PythonWorkflowDefinitionValue(
                 name=node.get('name', f'Node {node_id}'),
@@ -378,24 +378,23 @@ class PythonWorkflowDefinition(Workflow):
                 node_id=node_id,
                 node_type=node_type,
             )
-            
+
             # Store the section
             node_id_to_value_section[node_id] = value_section
             self.workflow_values.append(value_section)
-            
+
             # Add to workflow-level inputs/outputs based on node type
             if node_type == 'input':
                 self.inputs.append(
                     Link(
-                        name=node.get('name', f'Input {node_id}'), 
-                        section=value_section
+                        name=node.get('name', f'Input {node_id}'), section=value_section
                     )
                 )
             elif node_type == 'output':
                 self.outputs.append(
                     Link(
-                        name=node.get('name', f'Output {node_id}'), 
-                        section=value_section
+                        name=node.get('name', f'Output {node_id}'),
+                        section=value_section,
                     )
                 )
 
@@ -403,14 +402,14 @@ class PythonWorkflowDefinition(Workflow):
         for node in nodes:
             if node.get('type') == 'function':
                 node_id = node.get('id')
-                
+
                 # Create task
                 task = PythonWorkflowDefinitionTask(
                     name=f"Function {node.get('value', node_id)}",
                     node_type='function',
                     node_id=node_id,
                 )
-                
+
                 # Create function data section
                 function_data = PythonWorkflowDefinitionFunctionData(
                     module_function=node.get('value'),
@@ -418,17 +417,17 @@ class PythonWorkflowDefinition(Workflow):
                     execution_status='pending',
                 )
                 task.function_data = function_data
-                
+
                 # Step 3: Add input connections based on edges
                 self._add_task_input_connections(
                     task, node_id, edges, node_id_to_value_section
                 )
-                
-                # Step 4: Add output connections based on edges  
+
+                # Step 4: Add output connections based on edges
                 self._add_task_output_connections(
                     task, node_id, edges, node_id_to_value_section
                 )
-                
+
                 self.workflow_tasks.append(task)
 
         # Update main workflow tasks (only function tasks)
@@ -441,7 +440,7 @@ class PythonWorkflowDefinition(Workflow):
     ):
         """
         Add input connections to a task based on workflow edges.
-        
+
         Each edge where this node is the target creates an input connection.
         """
         for edge in edges:
@@ -450,18 +449,16 @@ class PythonWorkflowDefinition(Workflow):
                 if source_id in node_id_to_value_section:
                     source_section = node_id_to_value_section[source_id]
                     port_name = edge.get('targetPort', f'input_{source_id}')
-                    
+
                     # Create input link
-                    task.inputs.append(
-                        Link(name=port_name, section=source_section)
-                    )
+                    task.inputs.append(Link(name=port_name, section=source_section))
 
     def _add_task_output_connections(
         self, task, node_id, edges, node_id_to_value_section
     ):
         """
         Add output connections from a task based on workflow edges.
-        
+
         Each edge where this node is the source creates an output connection.
         For function nodes, we may need to create additional value sections
         for different output ports.
@@ -473,11 +470,11 @@ class PythonWorkflowDefinition(Workflow):
                 source_port = edge.get('sourcePort', INTERNAL_DEFAULT_HANDLE)
                 if source_port == INTERNAL_DEFAULT_HANDLE:
                     source_port = 'result'
-                
+
                 if source_port not in output_ports:
                     output_ports[source_port] = []
                 output_ports[source_port].append(edge)
-        
+
         # Create output connections for each port
         for port_name, port_edges in output_ports.items():
             # Create a value section for this output port if it doesn't exist
@@ -487,14 +484,12 @@ class PythonWorkflowDefinition(Workflow):
                 node_type='function',
                 port_name=port_name,
             )
-            
+
             # Add to workflow values
             self.workflow_values.append(output_value_section)
-            
+
             # Create output link from task to this value section
-            task.outputs.append(
-                Link(name=port_name, section=output_value_section)
-            )
+            task.outputs.append(Link(name=port_name, section=output_value_section))
 
     def load_from_pydantic_model(self, pwd_workflow: PythonWorkflowDefinitionWorkflow):
         """
