@@ -29,6 +29,8 @@ from nomad_parser_pwd.parsers.parser import PythonWorkflowDefinitionParser
 ARITHMETIC_NODES = 6
 ARITHMETIC_EDGES = 6
 ARITHMETIC_FUNCTIONS = 3
+ARITHMETIC_INPUTS = 2
+ARITHMETIC_OUTPUTS = 1
 
 NFDI_NODES = 9
 NFDI_EDGES = 17
@@ -276,3 +278,246 @@ def test_parse_all_examples(parser, test_data_path, example_name):
     assert archive.workflow2.results is not None
     assert archive.workflow2.results.n_nodes > 0
     assert archive.workflow2.results.n_edges >= 0
+
+
+# ============================================================================
+# Edge Parsing Tests
+# ============================================================================
+
+def test_edge_parsing_basic_structure(parser, test_data_path):
+    """Test that edge parsing creates proper workflow value sections."""
+    workflow_json_path = test_data_path / 'arithmetic' / 'workflow.json'
+    archive = EntryArchive()
+    
+    parser.parse(str(workflow_json_path), archive, None)
+    workflow = archive.workflow2
+    
+    # Verify workflow values are created
+    assert len(workflow.workflow_values) > 0
+    
+    # Check that we have value sections for all node types
+    input_values = [v for v in workflow.workflow_values if v.node_type == 'input']
+    output_values = [v for v in workflow.workflow_values if v.node_type == 'output']
+    function_values = [v for v in workflow.workflow_values if v.node_type == 'function']
+    
+    assert len(input_values) >= ARITHMETIC_INPUTS  # x, y inputs
+    assert len(output_values) >= ARITHMETIC_OUTPUTS  # result output
+    # function nodes + their outputs
+    assert len(function_values) >= ARITHMETIC_FUNCTIONS
+
+
+def test_edge_to_connection_mapping(parser, test_data_path):
+    """Test that edges are correctly mapped to task input/output connections."""
+    workflow_json_path = test_data_path / 'arithmetic' / 'workflow.json'
+    archive = EntryArchive()
+    
+    # Load raw data for comparison
+    with open(workflow_json_path) as f:
+        raw_data = json.load(f)
+    
+    parser.parse(str(workflow_json_path), archive, None)
+    workflow = archive.workflow2
+    
+    edges = raw_data['edges']
+    function_tasks = [t for t in workflow.workflow_tasks if t.node_type == 'function']
+    
+    # Verify that each edge creates appropriate connections
+    for task in function_tasks:
+        node_id = task.node_id
+        
+        # Count edges targeting this node (should match input connections)
+        incoming_edges = [e for e in edges if e['target'] == node_id]
+        assert len(task.inputs) == len(incoming_edges)
+        
+        # Count edges sourcing from this node (should match output connections)
+        outgoing_edges = [e for e in edges if e['source'] == node_id]
+        # Note: outputs might be grouped by port, so we check the relationship exists
+        assert len(task.outputs) > 0 if outgoing_edges else len(task.outputs) == 0
+
+
+def test_port_name_mapping(parser, test_data_path):
+    """Test that edge port names are correctly used in connections."""
+    workflow_json_path = test_data_path / 'arithmetic' / 'workflow.json'
+    archive = EntryArchive()
+    
+    # Load raw data for comparison
+    with open(workflow_json_path) as f:
+        raw_data = json.load(f)
+    
+    parser.parse(str(workflow_json_path), archive, None)
+    workflow = archive.workflow2
+    
+    edges = raw_data['edges']
+    function_tasks = [t for t in workflow.workflow_tasks if t.node_type == 'function']
+    
+    # Check first function task (get_prod_and_div) 
+    first_task = function_tasks[0]
+    assert first_task.node_id == 0
+    
+    # Verify input port names match targetPort in edges
+    incoming_edges = [e for e in edges if e['target'] == 0]
+    input_port_names = {inp.name for inp in first_task.inputs}
+    expected_port_names = {e['targetPort'] for e in incoming_edges}
+    assert input_port_names == expected_port_names
+    
+    # Verify output port names are created for sourcePort in edges
+    outgoing_edges = [e for e in edges if e['source'] == 0]
+    output_port_names = {out.name for out in first_task.outputs}
+    expected_source_ports = {e['sourcePort'] for e in outgoing_edges if e['sourcePort']}
+    # All non-null sourcePorts should have corresponding outputs
+    assert expected_source_ports.issubset(output_port_names)
+
+
+def test_value_section_references(parser, test_data_path):
+    """Test that task connections reference the correct value sections."""
+    workflow_json_path = test_data_path / 'arithmetic' / 'workflow.json'
+    archive = EntryArchive()
+    
+    parser.parse(str(workflow_json_path), archive, None)
+    workflow = archive.workflow2
+    
+    # Get node ID to value section mapping (for validation)
+    # node_to_value = {v.node_id: v for v in workflow.workflow_values}
+    
+    function_tasks = [t for t in workflow.workflow_tasks if t.node_type == 'function']
+    
+    for task in function_tasks:
+        # Check that all input connections reference valid value sections
+        for input_conn in task.inputs:
+            assert input_conn.section is not None
+            assert input_conn.section in workflow.workflow_values
+            
+        # Check that all output connections reference valid value sections
+        for output_conn in task.outputs:
+            assert output_conn.section is not None
+            assert output_conn.section in workflow.workflow_values
+
+
+def test_workflow_level_inputs_outputs(parser, test_data_path):
+    """Test that workflow-level inputs and outputs are properly connected."""
+    workflow_json_path = test_data_path / 'arithmetic' / 'workflow.json'
+    archive = EntryArchive()
+    
+    # Load raw data for comparison
+    with open(workflow_json_path) as f:
+        raw_data = json.load(f)
+    
+    parser.parse(str(workflow_json_path), archive, None)
+    workflow = archive.workflow2
+    
+    nodes = raw_data['nodes']
+    input_nodes = [n for n in nodes if n['type'] == 'input']
+    output_nodes = [n for n in nodes if n['type'] == 'output']
+    
+    # Workflow inputs should match input nodes
+    assert len(workflow.inputs) >= len(input_nodes)
+    
+    # Workflow outputs should match output nodes  
+    assert len(workflow.outputs) >= len(output_nodes)
+    
+    # Each workflow input should reference a value section
+    for workflow_input in workflow.inputs:
+        assert workflow_input.section is not None
+        assert workflow_input.section in workflow.workflow_values
+
+
+def test_edge_parsing_complex_workflow(parser, test_data_path):
+    """Test edge parsing with the complex quantum_espresso workflow."""
+    workflow_json_path = test_data_path / 'quantum_espresso' / 'workflow.json'
+    archive = EntryArchive()
+    
+    # Load raw data for comparison
+    with open(workflow_json_path) as f:
+        raw_data = json.load(f)
+    
+    parser.parse(str(workflow_json_path), archive, None)
+    workflow = archive.workflow2
+    
+    nodes = raw_data['nodes']
+    edges = raw_data['edges']
+    
+    # Verify comprehensive edge processing
+    # Should have additional output port values
+    assert len(workflow.workflow_values) > len(nodes)
+    assert workflow.results.n_edges == len(edges)
+    
+    # Check that all function nodes have corresponding tasks
+    function_nodes = [n for n in nodes if n['type'] == 'function']
+    function_tasks = [t for t in workflow.workflow_tasks if t.node_type == 'function']
+    assert len(function_tasks) == len(function_nodes)
+    
+    # Verify total connection count makes sense
+    total_inputs = sum(len(task.inputs) for task in function_tasks)
+    total_outputs = sum(len(task.outputs) for task in function_tasks)
+    
+    # Should have reasonable number of connections
+    assert total_inputs > 0
+    assert total_outputs > 0
+    
+    # Connection count should relate to edge count
+    # (not exact equality due to output port grouping)
+    assert total_inputs <= len(edges)  # Each edge creates at most one input
+    assert total_outputs > 0  # Should have some outputs
+
+
+def test_multiple_output_ports(parser, test_data_path):
+    """Test handling of functions with multiple output ports."""
+    workflow_json_path = test_data_path / 'arithmetic' / 'workflow.json'
+    archive = EntryArchive()
+    
+    # Load raw data for comparison
+    with open(workflow_json_path) as f:
+        raw_data = json.load(f)
+    
+    parser.parse(str(workflow_json_path), archive, None)
+    workflow = archive.workflow2
+    
+    edges = raw_data['edges']
+    
+    # Find function with multiple outputs (node 0: get_prod_and_div)
+    node_0_outgoing = [e for e in edges if e['source'] == 0]
+    source_ports = {e['sourcePort'] for e in node_0_outgoing if e['sourcePort']}
+    
+    if len(source_ports) > 1:  # If we have multiple output ports
+        # Find the corresponding task
+        task_0 = next((t for t in workflow.workflow_tasks if t.node_id == 0), None)
+        assert task_0 is not None
+        
+        # Should have output for each source port
+        output_names = {out.name for out in task_0.outputs}
+        assert source_ports.issubset(output_names)
+
+
+def test_edge_parsing_preserves_values(parser, test_data_path):
+    """Test that edge parsing preserves node values in value sections."""
+    workflow_json_path = test_data_path / 'arithmetic' / 'workflow.json'
+    archive = EntryArchive()
+    
+    # Load raw data for comparison
+    with open(workflow_json_path) as f:
+        raw_data = json.load(f)
+    
+    parser.parse(str(workflow_json_path), archive, None)
+    workflow = archive.workflow2
+    
+    nodes = raw_data['nodes']
+    
+    # Check that input values are preserved
+    for node in nodes:
+        if node['type'] == 'input' and 'value' in node:
+            # Find corresponding value section
+            value_section = next(
+                (v for v in workflow.workflow_values if v.node_id == node['id']), 
+                None
+            )
+            assert value_section is not None
+            assert value_section.value == node['value']
+            
+        if node['type'] == 'function':
+            # Find corresponding value section
+            value_section = next(
+                (v for v in workflow.workflow_values if v.node_id == node['id']), 
+                None
+            )
+            assert value_section is not None
+            assert value_section.value == node['value']
