@@ -22,7 +22,7 @@ from typing import Any
 
 from nomad.datamodel.data import ArchiveSection
 from nomad.datamodel.metainfo.workflow import Link, Task, Workflow
-from nomad.metainfo import Package, Quantity, Section, SubSection
+from nomad.metainfo import JSON, Package, Quantity, Section, SubSection
 from python_workflow_definition.models import (
     INTERNAL_DEFAULT_HANDLE,
     PythonWorkflowDefinitionWorkflow,
@@ -97,12 +97,12 @@ class PythonWorkflowDefinitionFunctionData(ArchiveSection):
     )
 
     inputs = Quantity(
-        type=dict[str, Any],
+        type=JSON,
         description='Input parameters for this function.',
     )
 
     outputs = Quantity(
-        type=dict[str, Any],
+        type=JSON,
         description='Output values from this function execution.',
     )
 
@@ -185,7 +185,7 @@ class PythonWorkflowDefinitionResults(ArchiveSection):
     )
 
     final_outputs = Quantity(
-        type=dict[str, Any],
+        type=JSON,
         description='Final output values from the workflow execution.',
     )
 

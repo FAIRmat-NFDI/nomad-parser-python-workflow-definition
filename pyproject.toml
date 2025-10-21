@@ -27,6 +27,7 @@ license = { file = "LICENSE" }
 dependencies = [
     "nomad-lab>=1.3.0",
     "python-magic-bin; sys_platform == 'win32'",
+    "python_workflow_definition",
 ]
 
 [project.urls]
@@ -34,6 +35,7 @@ Repository = "https://github.com/FAIRmat-NFDI/nomad-parser-pwd"
 
 [project.optional-dependencies]
 dev = ["ruff", "pytest", "structlog"]
+pwd = ["python_workflow_definition"]
 
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.
