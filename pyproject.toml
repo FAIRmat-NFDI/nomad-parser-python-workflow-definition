@@ -30,6 +30,11 @@ dependencies = [
     "python_workflow_definition",
 ]
 
+constraint-dependencies = [
+    "hyperspy>=1.7.6",
+    "pytz>=2022.7.1",  # Override aiida-core pytz constraint
+]
+
 [project.urls]
 Repository = "https://github.com/FAIRmat-NFDI/nomad-parser-pwd"
 

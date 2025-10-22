@@ -76,6 +76,40 @@ class WorkflowExecutionEnvironment(ArchiveSection):
     )
 
 
+class PythonWorkflowDefinitionValue(ArchiveSection):
+    """
+    Section representing a single value/node in the workflow definition.
+    Can represent input values, output placeholders, or function specifications.
+    """
+
+    m_def = Section(validate=False)
+
+    node_id = Quantity(
+        type=int,
+        description='Unique identifier of the node in the workflow definition.',
+    )
+
+    node_type = Quantity(
+        type=str,
+        description=('Type of the node: "input", "output", or "function".'),
+    )
+
+    name = Quantity(
+        type=str,
+        description='Name or label of the node.',
+    )
+
+    value = Quantity(
+        type=JSON,
+        description=(
+            'Value associated with the node. For input nodes, this contains '
+            'the input value. For function nodes, this contains the function '
+            'specification. For output nodes, this may be empty or contain '
+            'placeholder information.'
+        ),
+    )
+
+
 class PythonWorkflowDefinitionMethod(ArchiveSection):
     """
     Method section containing workflow definition metadata and configuration.
@@ -89,16 +123,26 @@ class PythonWorkflowDefinitionMethod(ArchiveSection):
         type=str,
         description='Python Workflow Definition specification version.',
     )
-    
+
     # Original workflow structure counts (for statistics)
     original_node_count = Quantity(
         type=int,
         description='Number of nodes in the original workflow definition.',
     )
-    
+
     original_edge_count = Quantity(
         type=int,
         description='Number of edges in the original workflow definition.',
+    )
+
+    # Workflow values representing all nodes from the original definition
+    workflow_values = SubSection(
+        sub_section=PythonWorkflowDefinitionValue,
+        repeats=True,
+        description=(
+            'All values/nodes from the workflow definition. This includes '
+            'input values, function specifications, and output placeholders.'
+        ),
     )
 
     # Author/creator information
@@ -108,11 +152,6 @@ class PythonWorkflowDefinitionMethod(ArchiveSection):
     )
 
     # Execution environment details
-    python_environment = Quantity(
-        type=str,
-        description='Python environment or interpreter used for execution.',
-    )
-
     execution_environment = SubSection(
         sub_section=WorkflowExecutionEnvironment,
         description='Runtime environment and platform details.',
@@ -147,20 +186,24 @@ class PythonWorkflowDefinitionResults(ArchiveSection):
     @property
     def n_nodes(self) -> int:
         """Get the number of nodes from the original workflow definition."""
-        if (hasattr(self, 'm_parent') and 
-            hasattr(self.m_parent, 'method') and 
-            self.m_parent.method and 
-            self.m_parent.method.original_node_count is not None):
+        if (
+            hasattr(self, 'm_parent')
+            and hasattr(self.m_parent, 'method')
+            and self.m_parent.method
+            and self.m_parent.method.original_node_count is not None
+        ):
             return self.m_parent.method.original_node_count
         return 0
 
     @property
     def n_edges(self) -> int:
         """Get the number of edges from the original workflow definition."""
-        if (hasattr(self, 'm_parent') and 
-            hasattr(self.m_parent, 'method') and 
-            self.m_parent.method and 
-            self.m_parent.method.original_edge_count is not None):
+        if (
+            hasattr(self, 'm_parent')
+            and hasattr(self.m_parent, 'method')
+            and self.m_parent.method
+            and self.m_parent.method.original_edge_count is not None
+        ):
             return self.m_parent.method.original_edge_count
         return 0
 
@@ -273,19 +316,145 @@ class PythonWorkflowDefinition(Workflow):
     def _create_nomad_workflow_structure(self, nodes, edges):
         """
         Create NOMAD workflow structure from PWD data.
-        No duplication - all data reconstructable from NOMAD structures.
+        Stores data in workflow_values and creates proper connections.
         """
         # Ensure method section exists for version storage
         if not self.method:
             self.method = PythonWorkflowDefinitionMethod()
 
-        # Find the highest node ID to generate unique IDs for connections
-        max_node_id = max((node.get('id', 0) for node in nodes), default=0)
-        connection_id_counter = max_node_id + 1000  # Start connections at a high number
+        # Create value sections for all nodes
+        self._create_workflow_values(nodes)
 
-        # Create NOMAD workflow structures for graph visualization
-        node_sections = self._create_node_sections(nodes)
-        self._create_function_tasks(nodes, edges, node_sections, connection_id_counter)
+        # Create function tasks with connections to value sections
+        self._create_function_tasks_with_values(nodes, edges)
+
+    def _create_workflow_values(self, nodes):
+        """Create value sections for all nodes in the workflow."""
+        for node in nodes:
+            value_section = PythonWorkflowDefinitionValue()
+            value_section.node_id = node.get('id')
+            value_section.node_type = node.get('type')
+            value_section.name = node.get(
+                'name', f"{node.get('type')}_{node.get('id')}"
+            )
+
+            # Handle different value types - JSON field expects dict
+            node_value = node.get('value')
+            if node_value is not None:
+                # Wrap all values in a dict for JSON storage
+                if isinstance(node_value, str | int | float | bool | list):
+                    value_section.value = {'data': node_value}
+                elif isinstance(node_value, dict):
+                    # If it's already a dict, ensure it's properly structured
+                    value_section.value = node_value
+                else:
+                    # For other types, wrap them
+                    value_section.value = {'data': node_value}
+            else:
+                value_section.value = None
+
+            self.method.workflow_values.append(value_section)
+
+            # Add to workflow-level inputs/outputs based on node type
+            if node.get('type') == 'input':
+                self.inputs.append(Link(name=value_section.name, section=value_section))
+            elif node.get('type') == 'output':
+                self.outputs.append(
+                    Link(name=value_section.name, section=value_section)
+                )
+
+    def _create_function_tasks_with_values(self, nodes, edges):
+        """Create tasks for function nodes with connections to workflow values."""
+        # Create a mapping from node_id to value section for easy lookup
+        node_to_value = {v.node_id: v for v in self.method.workflow_values}
+
+        # Create output port values for edges that need them
+        output_port_values = {}
+        for edge in edges:
+            source_id = edge.get('source')
+            source_port = edge.get('sourcePort')
+            if source_port is None:
+                source_port = 'result'
+
+            # Only create output port values for function nodes with named ports
+            source_node = next((n for n in nodes if n.get('id') == source_id), None)
+            if (
+                source_node
+                and source_node.get('type') == 'function'
+                and source_port != 'result'
+            ):
+                key = (source_id, source_port)
+                if key not in output_port_values:
+                    output_value = PythonWorkflowDefinitionValue()
+                    output_value.node_id = (
+                        len(self.method.workflow_values)
+                        + len(output_port_values)
+                        + 1000
+                    )
+                    output_value.node_type = 'output_port'
+                    output_value.name = f'{source_id}_{source_port}'
+                    output_value.value = {'port': source_port, 'source_node': source_id}
+
+                    output_port_values[key] = output_value
+                    self.method.workflow_values.append(output_value)
+
+        for node in nodes:
+            if node.get('type') != 'function':
+                continue
+
+            node_id = node.get('id')
+            node_name = f"Function {node.get('value', node_id)}"
+
+            # Create task
+            task = PythonWorkflowDefinitionTask(
+                name=node_name,
+                node_type='function',
+                node_id=node_id,
+                module_function=node.get('value'),
+            )
+
+            # Add input connections based on edges
+            for edge in edges:
+                if edge.get('target') == node_id:
+                    source_id = edge.get('source')
+                    source_port = edge.get('sourcePort')
+                    if source_port is None:
+                        source_port = 'result'
+                    target_port = edge.get('targetPort', f'input_{source_id}')
+
+                    # Find the appropriate source section
+                    source_section = None
+                    if (source_id, source_port) in output_port_values:
+                        source_section = output_port_values[(source_id, source_port)]
+                    else:
+                        source_section = node_to_value.get(source_id)
+
+                    if source_section:
+                        task.inputs.append(
+                            Link(name=target_port, section=source_section)
+                        )
+
+            # Add output connections based on edges
+            for edge in edges:
+                if edge.get('source') == node_id:
+                    source_port = edge.get('sourcePort')
+                    if source_port is None:
+                        source_port = 'result'
+
+                    # Find the appropriate output section
+                    output_section = None
+                    if (node_id, source_port) in output_port_values:
+                        output_section = output_port_values[(node_id, source_port)]
+                    else:
+                        # For 'result' outputs, reference the function's main value section
+                        output_section = node_to_value.get(node_id)
+
+                    if output_section:
+                        task.outputs.append(
+                            Link(name=source_port, section=output_section)
+                        )
+
+            self.tasks.append(task)
 
     def _create_node_sections(self, nodes):
         """Create minimal sections for nodes that need Link references."""
@@ -322,7 +491,7 @@ class PythonWorkflowDefinition(Workflow):
     ):
         """Create tasks for function nodes with proper connections."""
         current_connection_id = connection_id_counter
-        
+
         # Create a mapping from (source_node, source_port) to shared section
         # This ensures outputs and inputs reference the same section
         connection_sections = {}
@@ -350,7 +519,7 @@ class PythonWorkflowDefinition(Workflow):
                     if source_port is None:
                         source_port = 'result'
                     target_port = edge.get('targetPort', f'input_{source_id}')
-                    
+
                     # Get or create shared section for this connection
                     connection_key = (source_id, source_port)
                     if connection_key not in connection_sections:
@@ -361,17 +530,17 @@ class PythonWorkflowDefinition(Workflow):
                         else:
                             # Create shared section for function-to-function connection
                             connection_section = PythonWorkflowDefinitionTask()
-                            connection_section.name = f'connection_{source_id}_{source_port}'
+                            connection_section.name = (
+                                f'connection_{source_id}_{source_port}'
+                            )
                             connection_section.node_type = 'connection'
                             connection_section.node_id = current_connection_id
                             current_connection_id += 1
                             connection_sections[connection_key] = connection_section
-                    
+
                     # Add input that references the shared section
                     shared_section = connection_sections[connection_key]
-                    task.inputs.append(
-                        Link(name=target_port, section=shared_section)
-                    )
+                    task.inputs.append(Link(name=target_port, section=shared_section))
 
             # Add output connections based on edges
             for edge in edges:
@@ -379,7 +548,7 @@ class PythonWorkflowDefinition(Workflow):
                     source_port = edge.get('sourcePort')
                     if source_port is None:
                         source_port = 'result'
-                    
+
                     # Get or create shared section for this output
                     connection_key = (node_id, source_port)
                     if connection_key not in connection_sections:
@@ -389,12 +558,10 @@ class PythonWorkflowDefinition(Workflow):
                         connection_section.node_id = current_connection_id
                         current_connection_id += 1
                         connection_sections[connection_key] = connection_section
-                    
+
                     # Add output that references the shared section
                     shared_section = connection_sections[connection_key]
-                    task.outputs.append(
-                        Link(name=source_port, section=shared_section)
-                    )
+                    task.outputs.append(Link(name=source_port, section=shared_section))
 
             self.tasks.append(task)
 
@@ -417,7 +584,7 @@ class PythonWorkflowDefinition(Workflow):
         if isinstance(pwd_workflow, dict):
             # Extract metadata into method section
             self.method.version = pwd_workflow.get('version')
-            
+
             # Store original counts for statistics
             nodes = pwd_workflow.get('nodes', [])
             edges = pwd_workflow.get('edges', [])
@@ -426,7 +593,7 @@ class PythonWorkflowDefinition(Workflow):
         else:
             # Extract metadata into method section
             self.method.version = pwd_workflow.version
-            
+
             # Process nodes and edges to create NOMAD structures
             nodes = [node.model_dump() for node in pwd_workflow.nodes]
             edges = [edge.model_dump() for edge in pwd_workflow.edges]
