@@ -28,7 +28,9 @@ from nomad.config import config
 from nomad.parsing.parser import MatchingParser
 from python_workflow_definition.models import PythonWorkflowDefinitionWorkflow
 
-from ..schema_packages.pwd import PythonWorkflowDefinition
+from ..schema_packages.pwd import (
+    PythonWorkflowDefinition,
+)
 
 configuration = config.get_plugin_entry_point(
     'nomad_parser_pwd.parsers:parser_entry_point'
@@ -329,40 +331,46 @@ class PythonWorkflowDefinitionParser(MatchingParser):
 
             # Parse using Pydantic model for validation
             try:
-                pwd_workflow_dict = PythonWorkflowDefinitionWorkflow.load_json_str(
+                pwd_workflow_model = PythonWorkflowDefinitionWorkflow.load_json_str(
                     file_content
                 )
                 logger.info('Successfully validated workflow definition structure')
 
                 # Create the NOMAD workflow
                 workflow = PythonWorkflowDefinition()
-                workflow.raw_workflow_definition = file_content
-
+                
                 # Set workflow name from filename if not provided
                 if not workflow.name:
                     base_name = os.path.splitext(os.path.basename(mainfile))[0]
                     workflow.name = f'Python Workflow Definition: {base_name}'
 
-                # The normalization will handle the conversion from raw JSON
-                # to the structured NOMAD workflow representation
+                # Load workflow from Pydantic model
+                workflow.load_from_pydantic_model(pwd_workflow_model)
+
+                # Set the workflow in the archive
                 archive.workflow2 = workflow
 
-                # Trigger normalization to populate method and results sections
+                # Trigger normalization
                 workflow.normalize(archive, logger)
 
                 logger.info(
-                    f'Created workflow with {len(pwd_workflow_dict.get("nodes", []))} '
-                    f'nodes and {len(pwd_workflow_dict.get("edges", []))} edges'
+                    'Successfully created Python Workflow Definition from JSON'
                 )
 
-                # Log workflow statistics
-                nodes = pwd_workflow_dict.get('nodes', [])
-                node_types = {}
-                for node in nodes:
-                    node_type = node.get('type', 'unknown')
-                    node_types[node_type] = node_types.get(node_type, 0) + 1
-
-                logger.info(f'Node type distribution: {node_types}')
+                # Log workflow statistics from the workflow values
+                if workflow.workflow_values:
+                    value_count = len(workflow.workflow_values)
+                    logger.info(f'Created workflow with {value_count} workflow values')
+                    
+                    # Log value type distribution
+                    value_types = {}
+                    for value in workflow.workflow_values:
+                        value_type = value.node_type if value.node_type else 'unknown'
+                        value_types[value_type] = value_types.get(value_type, 0) + 1
+                    
+                    logger.info(f'Value type distribution: {value_types}')
+                else:
+                    logger.info('Created workflow with no workflow values')
 
             except Exception as e:
                 logger.error(f'Failed to validate workflow definition: {e}')

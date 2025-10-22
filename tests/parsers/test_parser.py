@@ -114,10 +114,11 @@ def test_parse_arithmetic_example(parser, test_data_path):
     name_lower = archive.workflow2.name.lower()
     assert 'arithmetic' in name_lower or 'python workflow definition' in name_lower
 
+    # Test version at top level (as per specification)
+    assert archive.workflow2.version == '0.1.0'
+
     # Test method section
     assert archive.workflow2.method is not None
-    assert archive.workflow2.method.version == '0.1.0'
-    assert archive.workflow2.method.workflow_definition is not None
 
     # Test results section
     assert archive.workflow2.results is not None

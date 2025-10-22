@@ -16,7 +16,6 @@
 # limitations under the License.
 #
 
-import json
 import logging
 from typing import Any
 
@@ -25,12 +24,59 @@ from nomad.datamodel.metainfo.workflow import Link, Task, Workflow
 from nomad.metainfo import JSON, Package, Quantity, Section, SubSection
 from python_workflow_definition.models import (
     INTERNAL_DEFAULT_HANDLE,
-    PythonWorkflowDefinitionWorkflow,
 )
 
 logger = logging.getLogger(__name__)
 
 m_package = Package(name='python_workflow_definition')
+
+
+class WorkflowAuthor(ArchiveSection):
+    """
+    Author information for workflow definition.
+    Following h5md pattern for creator tracking.
+    """
+
+    m_def = Section(validate=False)
+
+    name = Quantity(
+        type=str,
+        description='Name of workflow definition author.',
+    )
+
+    email = Quantity(
+        type=str,
+        description='Email of workflow definition author.',
+    )
+
+    affiliation = Quantity(
+        type=str,
+        description='Institution or organization of the author.',
+    )
+
+
+class WorkflowExecutionEnvironment(ArchiveSection):
+    """
+    Execution environment details for workflow.
+    """
+
+    m_def = Section(validate=False)
+
+    python_version = Quantity(
+        type=str,
+        description='Python interpreter version used.',
+    )
+
+    packages = Quantity(
+        type=str,
+        shape=['*'],
+        description='Python packages and versions available in environment.',
+    )
+
+    platform = Quantity(
+        type=str,
+        description='Operating system and platform information.',
+    )
 
 
 class PythonWorkflowDefinitionValue(ArchiveSection):
@@ -69,127 +115,42 @@ class PythonWorkflowDefinitionValue(ArchiveSection):
     )
 
 
-class PythonWorkflowDefinitionInputData(ArchiveSection):
-    """
-    Section representing input data for a Python workflow definition.
-    """
-
-    m_def = Section(validate=False)
-
-    name = Quantity(
-        type=str,
-        description='Name of the input parameter.',
-    )
-
-    value = Quantity(
-        type=Any,
-        description='Value of the input parameter.',
-    )
-
-    node_id = Quantity(
-        type=int,
-        description='ID of the corresponding input node in the workflow definition.',
-    )
-
-
-class PythonWorkflowDefinitionOutputData(ArchiveSection):
-    """
-    Section representing output data for a Python workflow definition.
-    """
-
-    m_def = Section(validate=False)
-
-    name = Quantity(
-        type=str,
-        description='Name of the output parameter.',
-    )
-
-    value = Quantity(
-        type=Any,
-        description='Value of the output parameter (if available).',
-    )
-
-    node_id = Quantity(
-        type=int,
-        description='ID of the corresponding output node in the workflow definition.',
-    )
-
-
-class PythonWorkflowDefinitionFunctionData(ArchiveSection):
-    """
-    Section representing a function execution in a Python workflow definition.
-    """
-
-    m_def = Section(validate=False)
-
-    module_function = Quantity(
-        type=str,
-        description='Function specification in module.function format.',
-    )
-
-    node_id = Quantity(
-        type=int,
-        description='ID of the corresponding function node in the workflow definition.',
-    )
-
-    inputs = Quantity(
-        type=JSON,
-        description='Input parameters for this function.',
-    )
-
-    outputs = Quantity(
-        type=JSON,
-        description='Output values from this function execution.',
-    )
-
-    execution_status = Quantity(
-        type=str,
-        description='Execution status: pending, running, completed, failed.',
-    )
-
-    error_message = Quantity(
-        type=str,
-        description='Error message if execution failed.',
-    )
-
-
 class PythonWorkflowDefinitionMethod(ArchiveSection):
     """
-    Method section containing the workflow definition and configuration.
+    Method section containing workflow definition metadata and configuration.
+    Following established NOMAD workflow patterns.
     """
 
     m_def = Section(validate=False)
 
+    # Core specification metadata
     version = Quantity(
         type=str,
-        description='Version of the Python workflow definition format.',
+        description='Python Workflow Definition specification version.',
     )
 
-    workflow_definition = Quantity(
-        type=str,
-        description='JSON representation of the workflow definition.',
+    # Author/creator information
+    author = SubSection(
+        sub_section=WorkflowAuthor,
+        description='Workflow definition author information.',
     )
 
+    # Execution environment details
     python_environment = Quantity(
         type=str,
         description='Python environment or interpreter used for execution.',
     )
 
-    def normalize(self, archive, logger):
-        """Normalize the method section."""
-        super().normalize(archive, logger)
-
-        # Validate workflow definition JSON if present
-        if self.workflow_definition:
-            try:
-                json.loads(self.workflow_definition)
-            except json.JSONDecodeError as e:
-                logger.warning(f'Invalid workflow definition JSON: {e}')
+    execution_environment = SubSection(
+        sub_section=WorkflowExecutionEnvironment,
+        description='Runtime environment and platform details.',
+    )
 
 
 class PythonWorkflowDefinitionResults(ArchiveSection):
     """
-    Results section containing execution results and metadata.
+    Results section containing workflow execution results and derived properties.
+    Following established NOMAD workflow patterns - only outputs, no metadata.
     """
 
     m_def = Section(validate=False)
@@ -198,21 +159,6 @@ class PythonWorkflowDefinitionResults(ArchiveSection):
         type=float,
         unit='second',
         description='Total execution time of the workflow.',
-    )
-
-    n_nodes = Quantity(
-        type=int,
-        description='Total number of nodes in the workflow.',
-    )
-
-    n_edges = Quantity(
-        type=int,
-        description='Total number of edges in the workflow.',
-    )
-
-    n_function_nodes = Quantity(
-        type=int,
-        description='Number of function nodes in the workflow.',
     )
 
     execution_successful = Quantity(
@@ -225,10 +171,33 @@ class PythonWorkflowDefinitionResults(ArchiveSection):
         description='Final output values from the workflow execution.',
     )
 
+    # Compatibility properties for tests - delegate to parent workflow
+    @property
+    def n_nodes(self) -> int:
+        """Get the number of nodes from the parent workflow."""
+        if hasattr(self, 'm_parent') and hasattr(self.m_parent, 'n_nodes'):
+            return self.m_parent.n_nodes
+        return 0
+
+    @property 
+    def n_edges(self) -> int:
+        """Get the number of edges from the parent workflow."""
+        if hasattr(self, 'm_parent') and hasattr(self.m_parent, 'n_edges'):
+            return self.m_parent.n_edges
+        return 0
+
+    @property
+    def n_function_nodes(self) -> int:
+        """Get the number of function nodes from the parent workflow."""
+        if hasattr(self, 'm_parent') and hasattr(self.m_parent, 'n_function_nodes'):
+            return self.m_parent.n_function_nodes
+        return 0
+
 
 class PythonWorkflowDefinitionTask(Task):
     """
     Task representing a single node execution in the Python workflow definition.
+    Uses the base Task class inputs/outputs for connections.
     """
 
     node_type = Quantity(
@@ -241,58 +210,80 @@ class PythonWorkflowDefinitionTask(Task):
         description='Unique identifier of the node in the workflow definition.',
     )
 
-    function_data = SubSection(
-        sub_section=PythonWorkflowDefinitionFunctionData,
-        description='Function execution data (for function nodes).',
-    )
-
-    input_data = SubSection(
-        sub_section=PythonWorkflowDefinitionInputData,
-        description='Input data (for input nodes).',
-    )
-
-    output_data = SubSection(
-        sub_section=PythonWorkflowDefinitionOutputData,
-        description='Output data (for output nodes).',
+    module_function = Quantity(
+        type=str,
+        description=(
+            'Function specification in module.function format (for function nodes).'
+        ),
     )
 
 
 class PythonWorkflowDefinition(Workflow):
     """
-    Main workflow class for Python workflow definitions.
+    Schema for Python Workflow Definition workflows.
 
-    This class integrates the Python workflow definition models with NOMAD's
-    workflow framework, providing storage and execution tracking capabilities.
+    This schema represents workflows defined using the Python Workflow Definition
+    specification. It extends the NOMAD Workflow base class and follows the 
+    established pattern of method/results sections for metadata and outputs.
+
+    Design Notes:
+    - Statistics properties (n_nodes, n_edges, etc.) are computed from workflow_values
+    - Task inputs/outputs use base Task class connections, not custom data sections
+    - No JSON duplication - structured data is stored directly in schema quantities
     """
 
     method = SubSection(
-        sub_section=PythonWorkflowDefinitionMethod,
-        description='Method section containing workflow definition and configuration.',
+        sub_section=PythonWorkflowDefinitionMethod.m_def,
+        description='Method and metadata section for the Python workflow definition',
     )
 
     results = SubSection(
-        sub_section=PythonWorkflowDefinitionResults,
-        description='Results section containing execution results.',
+        sub_section=PythonWorkflowDefinitionResults.m_def,
+        description='Results section for workflow execution outcomes',
     )
 
-    workflow_tasks = SubSection(
-        sub_section=PythonWorkflowDefinitionTask,
-        repeats=True,
-        description='Tasks representing individual node executions.',
-    )
-
-    # Store all workflow values (inputs, outputs, intermediate results)
     workflow_values = SubSection(
-        sub_section=PythonWorkflowDefinitionValue,
+        sub_section=PythonWorkflowDefinitionValue.m_def,
         repeats=True,
-        description='All values in the workflow (inputs, outputs, intermediate).',
+        description='Workflow values representing nodes and their data',
     )
 
-    # Raw workflow data for easy access
-    raw_workflow_definition = Quantity(
-        type=str,
-        description='Raw JSON workflow definition for direct access.',
-    )
+    def __init__(self, m_def=None, m_context=None, **kwargs):
+        super().__init__(m_def, m_context, **kwargs)
+
+    @property
+    def version(self) -> str | None:
+        """Get the workflow version from the method section."""
+        if self.method and self.method.version:
+            return self.method.version
+        return None
+
+    @property  
+    def workflow_tasks(self):
+        """Compatibility property for accessing tasks (for tests)."""
+        return self.tasks
+    
+    # Statistics properties for workflow analysis
+    @property
+    def n_nodes(self) -> int:
+        """Get the number of nodes (excluding connections)."""
+        if self.workflow_values:
+            return len([v for v in self.workflow_values if v.node_type != 'connection'])
+        return 0
+
+    @property 
+    def n_edges(self) -> int:
+        """Get the number of edges from the connection sections."""
+        if self.workflow_values:
+            return len([v for v in self.workflow_values if v.node_type == 'connection'])
+        return 0
+
+    @property
+    def n_function_nodes(self) -> int:
+        """Get the number of function nodes."""
+        if self.workflow_values:
+            return len([v for v in self.workflow_values if v.node_type == 'function'])
+        return 0
 
     def normalize(self, archive, logger):
         """
@@ -303,58 +294,9 @@ class PythonWorkflowDefinition(Workflow):
         """
         super().normalize(archive, logger)
 
-        if (
-            not self.raw_workflow_definition
-            and self.method
-            and self.method.workflow_definition
-        ):
-            self.raw_workflow_definition = self.method.workflow_definition
-
-        if self.raw_workflow_definition:
-            try:
-                self._process_workflow_definition(logger)
-            except Exception as e:
-                logger.error(f'Error processing workflow definition: {e}')
-
-    def _process_workflow_definition(self, logger):
-        """
-        Process the raw workflow definition and create NOMAD structures.
-        """
-        try:
-            # Parse the workflow definition using the Pydantic model
-            pwd_workflow = PythonWorkflowDefinitionWorkflow.load_json_str(
-                self.raw_workflow_definition
-            )
-        except Exception as e:
-            logger.error(f'Failed to parse workflow definition: {e}')
-            return
-
-        # Update method section
-        if not self.method:
-            self.method = PythonWorkflowDefinitionMethod()
-
-        if not self.method.version:
-            self.method.version = pwd_workflow.get('version', 'unknown')
-
-        if not self.method.workflow_definition:
-            self.method.workflow_definition = self.raw_workflow_definition
-
-        # Update results section
-        if not self.results:
-            self.results = PythonWorkflowDefinitionResults()
-
-        # Count nodes and edges
-        nodes = pwd_workflow.get('nodes', [])
-        edges = pwd_workflow.get('edges', [])
-
-        self.results.n_nodes = len(nodes)
-        self.results.n_edges = len(edges)
-        self.results.n_function_nodes = len(
-            [n for n in nodes if n.get('type') == 'function']
-        )
-
-        # Create workflow tasks and NOMAD workflow structure
-        self._create_nomad_workflow_structure(nodes, edges, logger)
+        # The workflow is populated by the parser directly from the JSON structure
+        # No additional processing needed here since the parser extracts
+        # structured data directly into the schema quantities
 
     def _create_nomad_workflow_structure(self, nodes, edges, logger):
         """
@@ -382,6 +324,8 @@ class PythonWorkflowDefinition(Workflow):
 
             # Store the section
             node_id_to_value_section[node_id] = value_section
+            if not self.workflow_values:
+                self.workflow_values = []
             self.workflow_values.append(value_section)
 
             # Add to workflow-level inputs/outputs based on node type
@@ -440,27 +384,19 @@ class PythonWorkflowDefinition(Workflow):
                     name=f"Function {node.get('value', node_id)}",
                     node_type='function',
                     node_id=node_id,
-                )
-
-                # Create function data section
-                function_data = PythonWorkflowDefinitionFunctionData(
                     module_function=node.get('value'),
-                    node_id=node_id,
-                    execution_status='pending',
                 )
-                task.function_data = function_data
 
                 # Step 4: Add connections using edge-specific sections
                 self._add_edge_based_connections(
                     task, node_id, edges, edge_to_connection_section
                 )
 
-                self.workflow_tasks.append(task)
+                self.tasks.append(task)
 
-        # Update main workflow tasks (only function tasks)
-        self.tasks = [
-            task for task in self.workflow_tasks if task.node_type == 'function'
-        ]
+        # Log completion
+        if logger:
+            logger.info(f'Created {len(self.tasks)} tasks')
 
     def _add_edge_based_connections(
         self, task, node_id, edges, edge_to_connection_section
@@ -510,33 +446,79 @@ class PythonWorkflowDefinition(Workflow):
                     Link(name=source_port, section=connection_section)
                 )
 
-    def load_from_pydantic_model(self, pwd_workflow: PythonWorkflowDefinitionWorkflow):
+    def load_from_pydantic_model(self, pwd_workflow):
         """
-        Load workflow data from a Pydantic model instance.
+        Load workflow data from a Pydantic model instance or dict.
 
         Args:
-            pwd_workflow: Instance of PythonWorkflowDefinitionWorkflow
+            pwd_workflow: Instance of PythonWorkflowDefinitionWorkflow or dict
         """
-        self.raw_workflow_definition = pwd_workflow.dump_json()
-
-        # Trigger normalization to process the workflow
-        if hasattr(self, 'm_parent') and hasattr(self.m_parent, 'logger'):
-            self._process_workflow_definition(self.m_parent.logger)
+        # Initialize method section if needed
+        if not self.method:
+            self.method = PythonWorkflowDefinitionMethod()
+            
+        # Initialize results section if needed  
+        if not self.results:
+            self.results = PythonWorkflowDefinitionResults()
+            
+        # Handle both dict and Pydantic model objects
+        if isinstance(pwd_workflow, dict):
+            # Extract metadata into method section
+            self.method.version = pwd_workflow.get('version')
+            
+            # Process nodes and edges to create NOMAD structures
+            nodes = pwd_workflow.get('nodes', [])
+            edges = pwd_workflow.get('edges', [])
+        else:
+            # Extract metadata into method section  
+            self.method.version = pwd_workflow.version
+            
+            # Process nodes and edges to create NOMAD structures
+            nodes = [node.model_dump() for node in pwd_workflow.nodes]
+            edges = [edge.model_dump() for edge in pwd_workflow.edges]
+        
+        # Create workflow tasks and NOMAD workflow structure
+        self._create_nomad_workflow_structure(nodes, edges, logger)
 
     def get_pydantic_model(self) -> dict[str, Any] | None:
         """
         Get the workflow as a Pydantic model dict.
 
         Returns:
-            Dictionary representation of the PythonWorkflowDefinitionWorkflow
+            Dictionary representation that matches PythonWorkflowDefinitionWorkflow
         """
-        if self.raw_workflow_definition:
-            try:
-                return PythonWorkflowDefinitionWorkflow.load_json_str(
-                    self.raw_workflow_definition
-                )
-            except Exception as e:
-                logger.error(f'Failed to create Pydantic model: {e}')
+        if not self.method or not self.method.version or not self.workflow_values:
+            return None
+            
+        try:
+            # Reconstruct the workflow dict from stored structured data
+            nodes = []
+            edges = []
+            
+            # Reconstruct nodes from workflow_values and tasks
+            for value in self.workflow_values:
+                if value.node_type in ['input', 'output', 'function']:
+                    node = {
+                        'id': value.node_id,
+                        'type': value.node_type,
+                    }
+                    if value.name:
+                        node['name'] = value.name
+                    if value.value is not None:
+                        node['value'] = value.value
+                    nodes.append(node)
+            
+            # TODO: Reconstruct edges from task connections
+            # This would require analyzing the Link connections between tasks
+            
+            return {
+                'version': self.method.version,
+                'nodes': nodes,
+                'edges': edges
+            }
+            
+        except Exception as e:
+            logger.error(f'Failed to reconstruct Pydantic model: {e}')
         return None
 
 
