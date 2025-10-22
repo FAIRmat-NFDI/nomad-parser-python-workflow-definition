@@ -89,6 +89,17 @@ class PythonWorkflowDefinitionMethod(ArchiveSection):
         type=str,
         description='Python Workflow Definition specification version.',
     )
+    
+    # Original workflow structure counts (for statistics)
+    original_node_count = Quantity(
+        type=int,
+        description='Number of nodes in the original workflow definition.',
+    )
+    
+    original_edge_count = Quantity(
+        type=int,
+        description='Number of edges in the original workflow definition.',
+    )
 
     # Author/creator information
     author = SubSection(
@@ -135,19 +146,22 @@ class PythonWorkflowDefinitionResults(ArchiveSection):
     # Compatibility properties for tests - delegate to parent workflow
     @property
     def n_nodes(self) -> int:
-        """Get the number of nodes from the parent workflow."""
-        if hasattr(self, 'm_parent') and hasattr(self.m_parent, 'n_nodes'):
-            return self.m_parent.n_nodes
+        """Get the number of nodes from the original workflow definition."""
+        if (hasattr(self, 'm_parent') and 
+            hasattr(self.m_parent, 'method') and 
+            self.m_parent.method and 
+            self.m_parent.method.original_node_count is not None):
+            return self.m_parent.method.original_node_count
         return 0
 
     @property
     def n_edges(self) -> int:
-        """Get the number of edges by counting task connections."""
-        if hasattr(self, 'm_parent') and hasattr(self.m_parent, 'tasks'):
-            edge_count = 0
-            for task in self.m_parent.tasks:
-                edge_count += len(task.inputs) + len(task.outputs)
-            return edge_count
+        """Get the number of edges from the original workflow definition."""
+        if (hasattr(self, 'm_parent') and 
+            hasattr(self.m_parent, 'method') and 
+            self.m_parent.method and 
+            self.m_parent.method.original_edge_count is not None):
+            return self.m_parent.method.original_edge_count
         return 0
 
     @property
@@ -308,6 +322,10 @@ class PythonWorkflowDefinition(Workflow):
     ):
         """Create tasks for function nodes with proper connections."""
         current_connection_id = connection_id_counter
+        
+        # Create a mapping from (source_node, source_port) to shared section
+        # This ensures outputs and inputs reference the same section
+        connection_sections = {}
 
         for node in nodes:
             if node.get('type') != 'function':
@@ -328,34 +346,55 @@ class PythonWorkflowDefinition(Workflow):
             for edge in edges:
                 if edge.get('target') == node_id:
                     source_id = edge.get('source')
+                    source_port = edge.get('sourcePort')
+                    if source_port is None:
+                        source_port = 'result'
                     target_port = edge.get('targetPort', f'input_{source_id}')
-                    source_section = node_sections.get(source_id)
-
-                    if source_section:
-                        task.inputs.append(
-                            Link(name=target_port, section=source_section)
-                        )
+                    
+                    # Get or create shared section for this connection
+                    connection_key = (source_id, source_port)
+                    if connection_key not in connection_sections:
+                        # Check if source is an input/output node
+                        source_section = node_sections.get(source_id)
+                        if source_section:
+                            connection_sections[connection_key] = source_section
+                        else:
+                            # Create shared section for function-to-function connection
+                            connection_section = PythonWorkflowDefinitionTask()
+                            connection_section.name = f'connection_{source_id}_{source_port}'
+                            connection_section.node_type = 'connection'
+                            connection_section.node_id = current_connection_id
+                            current_connection_id += 1
+                            connection_sections[connection_key] = connection_section
+                    
+                    # Add input that references the shared section
+                    shared_section = connection_sections[connection_key]
+                    task.inputs.append(
+                        Link(name=target_port, section=shared_section)
+                    )
 
             # Add output connections based on edges
             for edge in edges:
                 if edge.get('source') == node_id:
-                    source_port = edge.get('sourcePort', 'result')
-                    target_id = edge.get('target')
-
-                    # Create a proper connection task for this specific output
-                    connection_section = PythonWorkflowDefinitionTask()
-                    connection_section.name = f'output_{source_port}'
-                    connection_section.node_type = 'connection'
-                    connection_section.node_id = current_connection_id
-                    current_connection_id += 1
-
+                    source_port = edge.get('sourcePort')
+                    if source_port is None:
+                        source_port = 'result'
+                    
+                    # Get or create shared section for this output
+                    connection_key = (node_id, source_port)
+                    if connection_key not in connection_sections:
+                        connection_section = PythonWorkflowDefinitionTask()
+                        connection_section.name = f'connection_{node_id}_{source_port}'
+                        connection_section.node_type = 'connection'
+                        connection_section.node_id = current_connection_id
+                        current_connection_id += 1
+                        connection_sections[connection_key] = connection_section
+                    
+                    # Add output that references the shared section
+                    shared_section = connection_sections[connection_key]
                     task.outputs.append(
-                        Link(name=source_port, section=connection_section)
+                        Link(name=source_port, section=shared_section)
                     )
-
-                    # Update node_sections so target can reference this
-                    if target_id in node_sections:
-                        node_sections[target_id] = connection_section
 
             self.tasks.append(task)
 
@@ -378,17 +417,21 @@ class PythonWorkflowDefinition(Workflow):
         if isinstance(pwd_workflow, dict):
             # Extract metadata into method section
             self.method.version = pwd_workflow.get('version')
-
-            # Process nodes and edges to create NOMAD structures
+            
+            # Store original counts for statistics
             nodes = pwd_workflow.get('nodes', [])
             edges = pwd_workflow.get('edges', [])
+            self.method.original_node_count = len(nodes)
+            self.method.original_edge_count = len(edges)
         else:
             # Extract metadata into method section
             self.method.version = pwd_workflow.version
-
+            
             # Process nodes and edges to create NOMAD structures
             nodes = [node.model_dump() for node in pwd_workflow.nodes]
             edges = [edge.model_dump() for edge in pwd_workflow.edges]
+            self.method.original_node_count = len(nodes)
+            self.method.original_edge_count = len(edges)
 
         # Create workflow tasks and NOMAD workflow structure
         self._create_nomad_workflow_structure(nodes, edges)
