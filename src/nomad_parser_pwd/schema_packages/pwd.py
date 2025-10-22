@@ -140,7 +140,7 @@ class PythonWorkflowDefinitionResults(ArchiveSection):
             return self.m_parent.n_nodes
         return 0
 
-    @property 
+    @property
     def n_edges(self) -> int:
         """Get the number of edges by counting task connections."""
         if hasattr(self, 'm_parent') and hasattr(self.m_parent, 'tasks'):
@@ -187,7 +187,7 @@ class PythonWorkflowDefinition(Workflow):
     Schema for Python Workflow Definition workflows.
 
     This schema represents workflows defined using the Python Workflow Definition
-    specification. It extends the NOMAD Workflow base class and follows the 
+    specification. It extends the NOMAD Workflow base class and follows the
     established pattern of method/results sections for metadata and outputs.
 
     Design Notes:
@@ -217,11 +217,11 @@ class PythonWorkflowDefinition(Workflow):
             return self.method.version
         return None
 
-    @property  
+    @property
     def workflow_tasks(self):
         """Compatibility property for accessing tasks (for tests)."""
         return self.tasks
-    
+
     # Statistics properties for workflow analysis
     @property
     def n_nodes(self) -> int:
@@ -229,7 +229,7 @@ class PythonWorkflowDefinition(Workflow):
         # Count workflow inputs, outputs, and function tasks
         return len(self.inputs) + len(self.outputs) + len(self.tasks)
 
-    @property 
+    @property
     def n_edges(self) -> int:
         """Get the number of edges by counting task connections."""
         edge_count = 0
@@ -265,19 +265,23 @@ class PythonWorkflowDefinition(Workflow):
         if not self.method:
             self.method = PythonWorkflowDefinitionMethod()
 
+        # Find the highest node ID to generate unique IDs for connections
+        max_node_id = max((node.get('id', 0) for node in nodes), default=0)
+        connection_id_counter = max_node_id + 1000  # Start connections at a high number
+
         # Create NOMAD workflow structures for graph visualization
         node_sections = self._create_node_sections(nodes)
-        self._create_function_tasks(nodes, edges, node_sections)
+        self._create_function_tasks(nodes, edges, node_sections, connection_id_counter)
 
     def _create_node_sections(self, nodes):
         """Create minimal sections for nodes that need Link references."""
         node_sections = {}
-        
+
         for node in nodes:
             node_id = node.get('id')
             node_type = node.get('type')
             node_name = node.get('name', f'{node_type}_{node_id}')
-            
+
             # Create a proper task section that can be referenced
             if node_type == 'input':
                 # For inputs, create a simple task with the input value
@@ -287,7 +291,7 @@ class PythonWorkflowDefinition(Workflow):
                 section.node_id = node_id
                 node_sections[node_id] = section
                 self.inputs.append(Link(name=node_name, section=section))
-                
+
             elif node_type == 'output':
                 # For outputs, create a simple task to represent the output
                 section = PythonWorkflowDefinitionTask()
@@ -296,15 +300,19 @@ class PythonWorkflowDefinition(Workflow):
                 section.node_id = node_id
                 node_sections[node_id] = section
                 self.outputs.append(Link(name=node_name, section=section))
-        
+
         return node_sections
 
-    def _create_function_tasks(self, nodes, edges, node_sections):
+    def _create_function_tasks(
+        self, nodes, edges, node_sections, connection_id_counter
+    ):
         """Create tasks for function nodes with proper connections."""
+        current_connection_id = connection_id_counter
+
         for node in nodes:
             if node.get('type') != 'function':
                 continue
-                
+
             node_id = node.get('id')
             node_name = f"Function {node.get('value', node_id)}"
 
@@ -322,28 +330,29 @@ class PythonWorkflowDefinition(Workflow):
                     source_id = edge.get('source')
                     target_port = edge.get('targetPort', f'input_{source_id}')
                     source_section = node_sections.get(source_id)
-                    
+
                     if source_section:
                         task.inputs.append(
                             Link(name=target_port, section=source_section)
                         )
 
-            # Add output connections based on edges  
+            # Add output connections based on edges
             for edge in edges:
                 if edge.get('source') == node_id:
                     source_port = edge.get('sourcePort', 'result')
                     target_id = edge.get('target')
-                    
+
                     # Create a proper connection task for this specific output
                     connection_section = PythonWorkflowDefinitionTask()
                     connection_section.name = f'output_{source_port}'
                     connection_section.node_type = 'connection'
-                    connection_section.node_id = f'{node_id}_out_{source_port}'
-                    
+                    connection_section.node_id = current_connection_id
+                    current_connection_id += 1
+
                     task.outputs.append(
                         Link(name=source_port, section=connection_section)
                     )
-                    
+
                     # Update node_sections so target can reference this
                     if target_id in node_sections:
                         node_sections[target_id] = connection_section
@@ -360,84 +369,88 @@ class PythonWorkflowDefinition(Workflow):
         # Initialize method section if needed
         if not self.method:
             self.method = PythonWorkflowDefinitionMethod()
-            
-        # Initialize results section if needed  
+
+        # Initialize results section if needed
         if not self.results:
             self.results = PythonWorkflowDefinitionResults()
-            
+
         # Handle both dict and Pydantic model objects
         if isinstance(pwd_workflow, dict):
             # Extract metadata into method section
             self.method.version = pwd_workflow.get('version')
-            
+
             # Process nodes and edges to create NOMAD structures
             nodes = pwd_workflow.get('nodes', [])
             edges = pwd_workflow.get('edges', [])
         else:
-            # Extract metadata into method section  
+            # Extract metadata into method section
             self.method.version = pwd_workflow.version
-            
+
             # Process nodes and edges to create NOMAD structures
             nodes = [node.model_dump() for node in pwd_workflow.nodes]
             edges = [edge.model_dump() for edge in pwd_workflow.edges]
-        
+
         # Create workflow tasks and NOMAD workflow structure
         self._create_nomad_workflow_structure(nodes, edges)
 
     def get_pydantic_model(self) -> dict[str, Any] | None:
         """
         Reconstruct PWD from NOMAD workflow structures.
-        
+
         Returns:
             Dictionary representation that matches PythonWorkflowDefinitionWorkflow
         """
         if not self.method or not self.method.version:
             return None
-            
+
         try:
             nodes = []
             edges = []
-            
+
             # Reconstruct input nodes from workflow.inputs
             for i, workflow_input in enumerate(self.inputs):
-                nodes.append({
-                    'id': i + 1,  # Assign sequential IDs
-                    'type': 'input',
-                    'name': workflow_input.name,
-                    'value': None
-                })
-            
-            # Reconstruct output nodes from workflow.outputs  
+                nodes.append(
+                    {
+                        'id': i + 1,  # Assign sequential IDs
+                        'type': 'input',
+                        'name': workflow_input.name,
+                        'value': None,
+                    }
+                )
+
+            # Reconstruct output nodes from workflow.outputs
             max_input_id = len(self.inputs)
             for i, workflow_output in enumerate(self.outputs):
-                nodes.append({
-                    'id': max_input_id + i + 1,
-                    'type': 'output', 
-                    'name': workflow_output.name,
-                    'value': None
-                })
-            
+                nodes.append(
+                    {
+                        'id': max_input_id + i + 1,
+                        'type': 'output',
+                        'name': workflow_output.name,
+                        'value': None,
+                    }
+                )
+
             # Reconstruct function nodes from tasks
             max_io_id = len(self.inputs) + len(self.outputs)
             for i, task in enumerate(self.tasks):
-                nodes.append({
-                    'id': max_io_id + i + 1,
-                    'type': 'function',
-                    'name': task.name,
-                    'value': task.module_function
-                })
-            
+                nodes.append(
+                    {
+                        'id': max_io_id + i + 1,
+                        'type': 'function',
+                        'name': task.name,
+                        'value': task.module_function,
+                    }
+                )
+
             # Reconstruct edges from task connections
             # This would require matching Link sections between tasks
             # For now, return empty edges as proof of concept
-            
-            return {
-                'version': self.method.version,
-                'nodes': nodes,
-                'edges': edges
-            }
-            
+
+            return {'version': self.method.version, 'nodes': nodes, 'edges': edges}
+
         except Exception as e:
             logger.error(f'Failed to reconstruct PWD from NOMAD structures: {e}')
             return None
+
+
 m_package.__init_metainfo__()
