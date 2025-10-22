@@ -387,7 +387,7 @@ def test_value_section_references(parser, test_data_path):
         for output_link in task.outputs:
             if output_link.section:
                 valid_sections.add(output_link.section)
-    
+
     # Add workflow-level input/output sections
     for workflow_input in workflow.inputs:
         if workflow_input.section:
@@ -528,9 +528,11 @@ def test_edge_parsing_preserves_values(parser, test_data_path):
             # Find corresponding input section
             input_section = None
             for workflow_input in workflow.inputs:
-                if (workflow_input.section and 
-                    hasattr(workflow_input.section, 'node_id') and
-                    workflow_input.section.node_id == node['id']):
+                if (
+                    workflow_input.section
+                    and hasattr(workflow_input.section, 'node_id')
+                    and workflow_input.section.node_id == node['id']
+                ):
                     input_section = workflow_input.section
                     break
             assert input_section is not None
@@ -703,3 +705,80 @@ def test_edge_matching_quantum_espresso(parser, test_data_path):
     assert (
         matching_edges == len(function_to_function_edges)
     ), f'Edge matching failed: {matching_edges}/{len(function_to_function_edges)} edges matched'
+
+
+def test_function_to_output_connections_regression(parser, test_data_path):
+    """
+    Regression test for the bug where function task outputs pointed to themselves
+    instead of the correct output nodes.
+
+    This specifically tests the arithmetic workflow where node 2 (get_square)
+    should have an output that points to node 5 (output node), not back to
+    the task for node 2 itself.
+    """
+    workflow_json_path = test_data_path / 'arithmetic' / 'workflow.json'
+    archive = EntryArchive()
+
+    # Load raw data to identify function-to-output edges
+    with open(workflow_json_path) as f:
+        raw_data = json.load(f)
+
+    parser.parse(str(workflow_json_path), archive, None)
+    workflow = archive.workflow2
+
+    edges = raw_data['edges']
+    nodes = raw_data['nodes']
+
+    # Constants for specific test case
+    FUNCTION_NODE_ID = 2  # get_square function
+    OUTPUT_NODE_ID = 5  # result output
+
+    # Find edges from function nodes to output nodes
+    function_to_output_edges = [
+        e
+        for e in edges
+        if any(n['id'] == e['source'] and n['type'] == 'function' for n in nodes)
+        and any(n['id'] == e['target'] and n['type'] == 'output' for n in nodes)
+    ]
+
+    # Test the specific case from arithmetic workflow:
+    # Node 2 (get_square) -> Node 5 (output)
+    node_2_to_5_edge = next(
+        (
+            e
+            for e in function_to_output_edges
+            if e['source'] == FUNCTION_NODE_ID and e['target'] == OUTPUT_NODE_ID
+        ),
+        None,
+    )
+
+    if node_2_to_5_edge is not None:
+        # Find the corresponding function task
+        source_task = next(
+            (t for t in workflow.workflow_tasks if t.node_id == FUNCTION_NODE_ID), None
+        )
+        assert source_task is not None, 'Task for node 2 not found'
+
+        # Find the output node
+        target_node = next(
+            (n for n in workflow.pwd_nodes if n.node_id == OUTPUT_NODE_ID), None
+        )
+        assert target_node is not None, 'Output node 5 not found'
+
+        # The critical test: task output should point to the output node,
+        # not back to the task
+        assert len(source_task.outputs) > 0, 'Task should have outputs'
+        task_output = source_task.outputs[0]  # get_square has one output
+
+        # This is the regression test: task output should NOT point to the
+        # source task
+        assert task_output.section is not source_task, (
+            f'Task output incorrectly points to source task itself! '
+            f'Task: {id(source_task)}, Output section: {id(task_output.section)}'
+        )
+
+        # Task output should point to the target output node
+        assert task_output.section is target_node, (
+            f'Task output should point to target node 5, not task 2. '
+            f'Expected: {id(target_node)}, Got: {id(task_output.section)}'
+        )
