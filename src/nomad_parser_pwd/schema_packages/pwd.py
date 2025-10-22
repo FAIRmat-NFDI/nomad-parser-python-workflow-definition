@@ -146,6 +146,15 @@ class PythonWorkflowDefinitionMethod(ArchiveSection):
         description='Runtime environment and platform details.',
     )
 
+    # Original workflow definition data for reconstruction
+    workflow_values = SubSection(
+        sub_section=PythonWorkflowDefinitionValue.m_def,
+        repeats=True,
+        description=(
+            'Workflow values representing nodes and their data from original definition'
+        ),
+    )
+
 
 class PythonWorkflowDefinitionResults(ArchiveSection):
     """
@@ -227,9 +236,10 @@ class PythonWorkflowDefinition(Workflow):
     established pattern of method/results sections for metadata and outputs.
 
     Design Notes:
-    - Statistics properties (n_nodes, n_edges, etc.) are computed from workflow_values
+    - Statistics properties computed from native NOMAD structures (tasks/inputs/outputs)
     - Task inputs/outputs use base Task class connections, not custom data sections
     - No JSON duplication - structured data is stored directly in schema quantities
+    - Original workflow data stored in method section for Pydantic model reconstruction
     """
 
     method = SubSection(
@@ -240,12 +250,6 @@ class PythonWorkflowDefinition(Workflow):
     results = SubSection(
         sub_section=PythonWorkflowDefinitionResults.m_def,
         description='Results section for workflow execution outcomes',
-    )
-
-    workflow_values = SubSection(
-        sub_section=PythonWorkflowDefinitionValue.m_def,
-        repeats=True,
-        description='Workflow values representing nodes and their data',
     )
 
     def __init__(self, m_def=None, m_context=None, **kwargs):
@@ -266,24 +270,26 @@ class PythonWorkflowDefinition(Workflow):
     # Statistics properties for workflow analysis
     @property
     def n_nodes(self) -> int:
-        """Get the number of nodes (excluding connections)."""
-        if self.workflow_values:
-            return len([v for v in self.workflow_values if v.node_type != 'connection'])
-        return 0
+        """Get the number of nodes from native NOMAD structures."""
+        # Count workflow inputs, outputs, and function tasks
+        return len(self.inputs) + len(self.outputs) + len(self.tasks)
 
     @property 
     def n_edges(self) -> int:
-        """Get the number of edges from the connection sections."""
-        if self.workflow_values:
-            return len([v for v in self.workflow_values if v.node_type == 'connection'])
+        """Get the number of edges from stored workflow values."""
+        # Count connection sections from method.workflow_values
+        if self.method and self.method.workflow_values:
+            connections = [
+                v for v in self.method.workflow_values if v.node_type == 'connection'
+            ]
+            return len(connections)
         return 0
 
     @property
     def n_function_nodes(self) -> int:
         """Get the number of function nodes."""
-        if self.workflow_values:
-            return len([v for v in self.workflow_values if v.node_type == 'function'])
-        return 0
+        # Function nodes are represented as tasks
+        return len(self.tasks)
 
     def normalize(self, archive, logger):
         """
@@ -307,6 +313,10 @@ class PythonWorkflowDefinition(Workflow):
         ensuring each edge creates exactly matching input/output connections
         that reference the same section for NOMAD graph visualization.
         """
+        # Initialize method.workflow_values if needed
+        if not self.method.workflow_values:
+            self.method.workflow_values = []
+
         # Step 1: Create value sections for all nodes
         node_id_to_value_section = {}
 
@@ -322,11 +332,9 @@ class PythonWorkflowDefinition(Workflow):
                 node_type=node_type,
             )
 
-            # Store the section
+            # Store the section in method
             node_id_to_value_section[node_id] = value_section
-            if not self.workflow_values:
-                self.workflow_values = []
-            self.workflow_values.append(value_section)
+            self.method.workflow_values.append(value_section)
 
             # Add to workflow-level inputs/outputs based on node type
             if node_type == 'input':
@@ -371,7 +379,7 @@ class PythonWorkflowDefinition(Workflow):
                 port_name=source_port,
             )
             
-            self.workflow_values.append(connection_section)
+            self.method.workflow_values.append(connection_section)
             edge_to_connection_section[i] = connection_section
 
         # Step 3: Create tasks for function nodes and establish connections
@@ -415,7 +423,7 @@ class PythonWorkflowDefinition(Workflow):
                 
                 # Find the source node type to determine connection strategy
                 source_node_value = next(
-                    (v for v in self.workflow_values if v.node_id == source_id 
+                    (v for v in self.method.workflow_values if v.node_id == source_id 
                      and v.node_type != 'connection'), 
                     None
                 )
@@ -487,7 +495,8 @@ class PythonWorkflowDefinition(Workflow):
         Returns:
             Dictionary representation that matches PythonWorkflowDefinitionWorkflow
         """
-        if not self.method or not self.method.version or not self.workflow_values:
+        if (not self.method or not self.method.version or 
+            not self.method.workflow_values):
             return None
             
         try:
@@ -495,8 +504,8 @@ class PythonWorkflowDefinition(Workflow):
             nodes = []
             edges = []
             
-            # Reconstruct nodes from workflow_values and tasks
-            for value in self.workflow_values:
+            # Reconstruct nodes from method.workflow_values 
+            for value in self.method.workflow_values:
                 if value.node_type in ['input', 'output', 'function']:
                     node = {
                         'id': value.node_id,

@@ -358,13 +358,13 @@ class PythonWorkflowDefinitionParser(MatchingParser):
                 )
 
                 # Log workflow statistics from the workflow values
-                if workflow.workflow_values:
-                    value_count = len(workflow.workflow_values)
+                if workflow.method and workflow.method.workflow_values:
+                    value_count = len(workflow.method.workflow_values)
                     logger.info(f'Created workflow with {value_count} workflow values')
                     
                     # Log value type distribution
                     value_types = {}
-                    for value in workflow.workflow_values:
+                    for value in workflow.method.workflow_values:
                         value_type = value.node_type if value.node_type else 'unknown'
                         value_types[value_type] = value_types.get(value_type, 0) + 1
                     

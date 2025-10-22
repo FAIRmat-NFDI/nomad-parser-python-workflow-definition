@@ -290,12 +290,13 @@ def test_edge_parsing_basic_structure(parser, test_data_path):
     workflow = archive.workflow2
 
     # Verify workflow values are created
-    assert len(workflow.workflow_values) > 0
+    assert len(workflow.method.workflow_values) > 0
 
     # Check that we have value sections for all node types
-    input_values = [v for v in workflow.workflow_values if v.node_type == 'input']
-    output_values = [v for v in workflow.workflow_values if v.node_type == 'output']
-    function_values = [v for v in workflow.workflow_values if v.node_type == 'function']
+    workflow_values = workflow.method.workflow_values
+    input_values = [v for v in workflow_values if v.node_type == 'input']
+    output_values = [v for v in workflow_values if v.node_type == 'output']
+    function_values = [v for v in workflow_values if v.node_type == 'function']
 
     assert len(input_values) >= ARITHMETIC_INPUTS  # x, y inputs
     assert len(output_values) >= ARITHMETIC_OUTPUTS  # result output
@@ -374,7 +375,7 @@ def test_value_section_references(parser, test_data_path):
     workflow = archive.workflow2
 
     # Get node ID to value section mapping (for validation)
-    # node_to_value = {v.node_id: v for v in workflow.workflow_values}
+    # node_to_value = {v.node_id: v for v in workflow.method.workflow_values}
 
     function_tasks = [t for t in workflow.workflow_tasks if t.node_type == 'function']
 
@@ -382,12 +383,12 @@ def test_value_section_references(parser, test_data_path):
         # Check that all input connections reference valid value sections
         for input_conn in task.inputs:
             assert input_conn.section is not None
-            assert input_conn.section in workflow.workflow_values
+            assert input_conn.section in workflow.method.workflow_values
 
         # Check that all output connections reference valid value sections
         for output_conn in task.outputs:
             assert output_conn.section is not None
-            assert output_conn.section in workflow.workflow_values
+            assert output_conn.section in workflow.method.workflow_values
 
 
 def test_workflow_level_inputs_outputs(parser, test_data_path):
@@ -415,7 +416,7 @@ def test_workflow_level_inputs_outputs(parser, test_data_path):
     # Each workflow input should reference a value section
     for workflow_input in workflow.inputs:
         assert workflow_input.section is not None
-        assert workflow_input.section in workflow.workflow_values
+        assert workflow_input.section in workflow.method.workflow_values
 
 
 def test_edge_parsing_complex_workflow(parser, test_data_path):
@@ -435,7 +436,7 @@ def test_edge_parsing_complex_workflow(parser, test_data_path):
 
     # Verify comprehensive edge processing
     # Should have additional output port values
-    assert len(workflow.workflow_values) > len(nodes)
+    assert len(workflow.method.workflow_values) > len(nodes)
     assert workflow.results.n_edges == len(edges)
 
     # Check that all function nodes have corresponding tasks
@@ -503,17 +504,15 @@ def test_edge_parsing_preserves_values(parser, test_data_path):
     for node in nodes:
         if node['type'] == 'input' and 'value' in node:
             # Find corresponding value section
-            value_section = next(
-                (v for v in workflow.workflow_values if v.node_id == node['id']), None
-            )
+            values = workflow.method.workflow_values
+            value_section = next((v for v in values if v.node_id == node['id']), None)
             assert value_section is not None
             assert value_section.value == node['value']
 
         if node['type'] == 'function':
             # Find corresponding value section
-            value_section = next(
-                (v for v in workflow.workflow_values if v.node_id == node['id']), None
-            )
+            values = workflow.method.workflow_values
+            value_section = next((v for v in values if v.node_id == node['id']), None)
             assert value_section is not None
             assert value_section.value == node['value']
 
