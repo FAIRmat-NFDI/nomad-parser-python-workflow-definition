@@ -357,20 +357,21 @@ class PythonWorkflowDefinitionParser(MatchingParser):
                     'Successfully created Python Workflow Definition from JSON'
                 )
 
-                # Log workflow statistics from the workflow values
-                if workflow.method and workflow.method.workflow_values:
-                    value_count = len(workflow.method.workflow_values)
-                    logger.info(f'Created workflow with {value_count} workflow values')
-                    
-                    # Log value type distribution
-                    value_types = {}
-                    for value in workflow.method.workflow_values:
-                        value_type = value.node_type if value.node_type else 'unknown'
-                        value_types[value_type] = value_types.get(value_type, 0) + 1
-                    
-                    logger.info(f'Value type distribution: {value_types}')
-                else:
-                    logger.info('Created workflow with no workflow values')
+                # Log workflow statistics from the NOMAD structures
+                logger.info(f'Created workflow with {len(workflow.tasks)} tasks')
+                logger.info(f'Workflow inputs: {len(workflow.inputs)}')
+                logger.info(f'Workflow outputs: {len(workflow.outputs)}')
+                
+                # Log task details
+                for i, task in enumerate(workflow.tasks):
+                    logger.info(
+                        f'Task {i}: {task.name} '
+                        f'(node_id={task.node_id}, type={task.node_type})'
+                    )
+
+            except Exception as e:
+                logger.error(f'Failed to validate workflow definition: {e}')
+                raise
 
             except Exception as e:
                 logger.error(f'Failed to validate workflow definition: {e}')

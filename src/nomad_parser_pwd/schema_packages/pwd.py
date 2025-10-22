@@ -143,10 +143,12 @@ class PythonWorkflowDefinitionResults(ArchiveSection):
     @property 
     def n_edges(self) -> int:
         """Get the number of edges by counting task connections."""
-        edge_count = 0
-        for task in self.tasks:
-            edge_count += len(task.inputs) + len(task.outputs)
-        return edge_count
+        if hasattr(self, 'm_parent') and hasattr(self.m_parent, 'tasks'):
+            edge_count = 0
+            for task in self.m_parent.tasks:
+                edge_count += len(task.inputs) + len(task.outputs)
+            return edge_count
+        return 0
 
     @property
     def n_function_nodes(self) -> int:
@@ -254,7 +256,7 @@ class PythonWorkflowDefinition(Workflow):
         # No additional processing needed here since the parser extracts
         # structured data directly into the schema quantities
 
-    def _create_nomad_workflow_structure(self, nodes, edges, logger):
+    def _create_nomad_workflow_structure(self, nodes, edges):
         """
         Create NOMAD workflow structure from PWD data.
         No duplication - all data reconstructable from NOMAD structures.
@@ -267,10 +269,6 @@ class PythonWorkflowDefinition(Workflow):
         node_sections = self._create_node_sections(nodes)
         self._create_function_tasks(nodes, edges, node_sections)
 
-        # Log completion
-        if logger:
-            logger.info(f'Created {len(self.tasks)} tasks from PWD structure')
-
     def _create_node_sections(self, nodes):
         """Create minimal sections for nodes that need Link references."""
         node_sections = {}
@@ -280,15 +278,23 @@ class PythonWorkflowDefinition(Workflow):
             node_type = node.get('type')
             node_name = node.get('name', f'{node_type}_{node_id}')
             
-            # Create a simple ArchiveSection for Link references
-            section = ArchiveSection()
-            section.name = node_name
-            node_sections[node_id] = section
-            
-            # Add to workflow-level inputs/outputs based on node type
+            # Create a proper task section that can be referenced
             if node_type == 'input':
+                # For inputs, create a simple task with the input value
+                section = PythonWorkflowDefinitionTask()
+                section.name = node_name
+                section.node_type = 'input'
+                section.node_id = node_id
+                node_sections[node_id] = section
                 self.inputs.append(Link(name=node_name, section=section))
+                
             elif node_type == 'output':
+                # For outputs, create a simple task to represent the output
+                section = PythonWorkflowDefinitionTask()
+                section.name = node_name
+                section.node_type = 'output'
+                section.node_id = node_id
+                node_sections[node_id] = section
                 self.outputs.append(Link(name=node_name, section=section))
         
         return node_sections
@@ -328,9 +334,11 @@ class PythonWorkflowDefinition(Workflow):
                     source_port = edge.get('sourcePort', 'result')
                     target_id = edge.get('target')
                     
-                    # Create a connection section for this specific output
-                    connection_section = ArchiveSection()
+                    # Create a proper connection task for this specific output
+                    connection_section = PythonWorkflowDefinitionTask()
                     connection_section.name = f'output_{source_port}'
+                    connection_section.node_type = 'connection'
+                    connection_section.node_id = f'{node_id}_out_{source_port}'
                     
                     task.outputs.append(
                         Link(name=source_port, section=connection_section)
@@ -374,7 +382,7 @@ class PythonWorkflowDefinition(Workflow):
             edges = [edge.model_dump() for edge in pwd_workflow.edges]
         
         # Create workflow tasks and NOMAD workflow structure
-        self._create_nomad_workflow_structure(nodes, edges, logger)
+        self._create_nomad_workflow_structure(nodes, edges)
 
     def get_pydantic_model(self) -> dict[str, Any] | None:
         """

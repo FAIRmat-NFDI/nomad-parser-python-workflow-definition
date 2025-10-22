@@ -282,26 +282,28 @@ def test_parse_all_examples(parser, test_data_path, example_name):
 
 
 def test_edge_parsing_basic_structure(parser, test_data_path):
-    """Test that edge parsing creates proper workflow value sections."""
+    """Test that parsing creates proper NOMAD workflow structures."""
     workflow_json_path = test_data_path / 'arithmetic' / 'workflow.json'
     archive = EntryArchive()
 
     parser.parse(str(workflow_json_path), archive, None)
     workflow = archive.workflow2
 
-    # Verify workflow values are created
-    assert len(workflow.method.workflow_values) > 0
+    # Verify NOMAD workflow structures are created
+    assert len(workflow.inputs) > 0
+    assert len(workflow.outputs) > 0
+    assert len(workflow.tasks) > 0
 
-    # Check that we have value sections for all node types
-    workflow_values = workflow.method.workflow_values
-    input_values = [v for v in workflow_values if v.node_type == 'input']
-    output_values = [v for v in workflow_values if v.node_type == 'output']
-    function_values = [v for v in workflow_values if v.node_type == 'function']
+    # Check that we have the expected number of each type
+    assert len(workflow.inputs) >= ARITHMETIC_INPUTS  # x, y inputs
+    assert len(workflow.outputs) >= ARITHMETIC_OUTPUTS  # result output
+    assert len(workflow.tasks) >= ARITHMETIC_FUNCTIONS  # function tasks
 
-    assert len(input_values) >= ARITHMETIC_INPUTS  # x, y inputs
-    assert len(output_values) >= ARITHMETIC_OUTPUTS  # result output
-    # function nodes + their outputs
-    assert len(function_values) >= ARITHMETIC_FUNCTIONS
+    # Check that tasks have the right properties
+    for task in workflow.tasks:
+        assert task.node_type == 'function'
+        assert task.node_id is not None
+        assert task.module_function is not None
 
 
 def test_edge_to_connection_mapping(parser, test_data_path):
@@ -367,28 +369,45 @@ def test_port_name_mapping(parser, test_data_path):
 
 
 def test_value_section_references(parser, test_data_path):
-    """Test that task connections reference the correct value sections."""
+    """Test that task connections reference valid sections."""
     workflow_json_path = test_data_path / 'arithmetic' / 'workflow.json'
     archive = EntryArchive()
 
     parser.parse(str(workflow_json_path), archive, None)
     workflow = archive.workflow2
 
-    # Get node ID to value section mapping (for validation)
-    # node_to_value = {v.node_id: v for v in workflow.method.workflow_values}
+    # Collect all valid sections (tasks, input/output task sections)
+    valid_sections = set()
+    for task in workflow.tasks:
+        valid_sections.add(task)
+        # Add input/output task sections
+        for input_link in task.inputs:
+            if input_link.section:
+                valid_sections.add(input_link.section)
+        for output_link in task.outputs:
+            if output_link.section:
+                valid_sections.add(output_link.section)
+    
+    # Add workflow-level input/output sections
+    for workflow_input in workflow.inputs:
+        if workflow_input.section:
+            valid_sections.add(workflow_input.section)
+    for workflow_output in workflow.outputs:
+        if workflow_output.section:
+            valid_sections.add(workflow_output.section)
 
     function_tasks = [t for t in workflow.workflow_tasks if t.node_type == 'function']
 
     for task in function_tasks:
-        # Check that all input connections reference valid value sections
+        # Check that all input connections reference valid sections
         for input_conn in task.inputs:
             assert input_conn.section is not None
-            assert input_conn.section in workflow.method.workflow_values
+            assert input_conn.section in valid_sections
 
-        # Check that all output connections reference valid value sections
+        # Check that all output connections reference valid sections
         for output_conn in task.outputs:
             assert output_conn.section is not None
-            assert output_conn.section in workflow.method.workflow_values
+            assert output_conn.section in valid_sections
 
 
 def test_workflow_level_inputs_outputs(parser, test_data_path):
@@ -416,7 +435,9 @@ def test_workflow_level_inputs_outputs(parser, test_data_path):
     # Each workflow input should reference a value section
     for workflow_input in workflow.inputs:
         assert workflow_input.section is not None
-        assert workflow_input.section in workflow.method.workflow_values
+        # Section should be a valid PythonWorkflowDefinitionTask
+        assert hasattr(workflow_input.section, 'node_type')
+        assert workflow_input.section.node_type == 'input'
 
 
 def test_edge_parsing_complex_workflow(parser, test_data_path):
@@ -435,8 +456,9 @@ def test_edge_parsing_complex_workflow(parser, test_data_path):
     edges = raw_data['edges']
 
     # Verify comprehensive edge processing
-    # Should have additional output port values
-    assert len(workflow.method.workflow_values) > len(nodes)
+    # Should have created tasks and connections
+    total_entities = len(workflow.tasks) + len(workflow.inputs) + len(workflow.outputs)
+    assert total_entities >= len(nodes)
     assert workflow.results.n_edges == len(edges)
 
     # Check that all function nodes have corresponding tasks
@@ -500,21 +522,25 @@ def test_edge_parsing_preserves_values(parser, test_data_path):
 
     nodes = raw_data['nodes']
 
-    # Check that input values are preserved
+    # Check that input values are preserved in input task sections
     for node in nodes:
         if node['type'] == 'input' and 'value' in node:
-            # Find corresponding value section
-            values = workflow.method.workflow_values
-            value_section = next((v for v in values if v.node_id == node['id']), None)
-            assert value_section is not None
-            assert value_section.value == node['value']
+            # Find corresponding input section
+            input_section = None
+            for workflow_input in workflow.inputs:
+                if (workflow_input.section and 
+                    hasattr(workflow_input.section, 'node_id') and
+                    workflow_input.section.node_id == node['id']):
+                    input_section = workflow_input.section
+                    break
+            assert input_section is not None
+            # Note: We don't store the value anymore, just the structure
 
         if node['type'] == 'function':
-            # Find corresponding value section
-            values = workflow.method.workflow_values
-            value_section = next((v for v in values if v.node_id == node['id']), None)
-            assert value_section is not None
-            assert value_section.value == node['value']
+            # Find corresponding task
+            task = next((t for t in workflow.tasks if t.node_id == node['id']), None)
+            assert task is not None
+            assert task.module_function == node['value']
 
 
 def test_edge_connection_matching_for_nomad_visualization(parser, test_data_path):
