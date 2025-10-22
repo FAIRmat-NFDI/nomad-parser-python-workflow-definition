@@ -362,7 +362,8 @@ class PythonWorkflowDefinition(Workflow):
         Python workflow definition.
 
         This method creates proper Link connections between tasks based on edges,
-        storing values in dedicated sections that can be referenced.
+        ensuring each edge creates exactly matching input/output connections
+        that reference the same section for NOMAD graph visualization.
         """
         # Step 1: Create value sections for all nodes
         node_id_to_value_section = {}
@@ -374,7 +375,7 @@ class PythonWorkflowDefinition(Workflow):
             # Create a value section for each node
             value_section = PythonWorkflowDefinitionValue(
                 name=node.get('name', f'Node {node_id}'),
-                value=node.get('value'),  # This will be properly handled by JSON type
+                value=node.get('value'),
                 node_id=node_id,
                 node_type=node_type,
             )
@@ -387,7 +388,8 @@ class PythonWorkflowDefinition(Workflow):
             if node_type == 'input':
                 self.inputs.append(
                     Link(
-                        name=node.get('name', f'Input {node_id}'), section=value_section
+                        name=node.get('name', f'Input {node_id}'), 
+                        section=value_section
                     )
                 )
             elif node_type == 'output':
@@ -398,7 +400,37 @@ class PythonWorkflowDefinition(Workflow):
                     )
                 )
 
-        # Step 2: Create tasks for function nodes and establish connections
+        # Step 2: Create connection value sections for edges
+        # This ensures each edge has exactly one section that both
+        # source output and target input will reference
+        edge_to_connection_section = {}
+        
+        for i, edge in enumerate(edges):
+            source_id = edge.get('source')
+            target_id = edge.get('target')
+            source_port = edge.get('sourcePort')
+            target_port = edge.get('targetPort', f'input_{source_id}')
+            
+            # Handle None and INTERNAL_DEFAULT_HANDLE the same way
+            if source_port is None or source_port == INTERNAL_DEFAULT_HANDLE:
+                source_port = 'result'
+            
+            # Create a unique value section for this connection
+            connection_name = (
+                f'Connection {source_id}:{source_port} -> {target_id}:{target_port}'
+            )
+            connection_section = PythonWorkflowDefinitionValue(
+                name=connection_name,
+                value=None,  # Will be populated during execution
+                node_id=source_id,  # Track which node produces this value
+                node_type='connection',
+                port_name=source_port,
+            )
+            
+            self.workflow_values.append(connection_section)
+            edge_to_connection_section[i] = connection_section
+
+        # Step 3: Create tasks for function nodes and establish connections
         for node in nodes:
             if node.get('type') == 'function':
                 node_id = node.get('id')
@@ -418,14 +450,9 @@ class PythonWorkflowDefinition(Workflow):
                 )
                 task.function_data = function_data
 
-                # Step 3: Add input connections based on edges
-                self._add_task_input_connections(
-                    task, node_id, edges, node_id_to_value_section
-                )
-
-                # Step 4: Add output connections based on edges
-                self._add_task_output_connections(
-                    task, node_id, edges, node_id_to_value_section
+                # Step 4: Add connections using edge-specific sections
+                self._add_edge_based_connections(
+                    task, node_id, edges, edge_to_connection_section
                 )
 
                 self.workflow_tasks.append(task)
@@ -435,61 +462,53 @@ class PythonWorkflowDefinition(Workflow):
             task for task in self.workflow_tasks if task.node_type == 'function'
         ]
 
-    def _add_task_input_connections(
-        self, task, node_id, edges, node_id_to_value_section
+    def _add_edge_based_connections(
+        self, task, node_id, edges, edge_to_connection_section
     ):
         """
-        Add input connections to a task based on workflow edges.
-
-        Each edge where this node is the target creates an input connection.
+        Add input and output connections based on edges using shared sections.
+        
+        This ensures each edge creates exactly one input and one output connection
+        that reference the same section for proper NOMAD graph visualization.
         """
-        for edge in edges:
+        # Add input connections: edges where this node is the target
+        for i, edge in enumerate(edges):
             if edge.get('target') == node_id:
                 source_id = edge.get('source')
-                if source_id in node_id_to_value_section:
-                    source_section = node_id_to_value_section[source_id]
-                    port_name = edge.get('targetPort', f'input_{source_id}')
+                target_port = edge.get('targetPort', f'input_{source_id}')
+                
+                # Find the source node type to determine connection strategy
+                source_node_value = next(
+                    (v for v in self.workflow_values if v.node_id == source_id 
+                     and v.node_type != 'connection'), 
+                    None
+                )
+                
+                if source_node_value and source_node_value.node_type == 'input':
+                    # Input node case: connect directly to node value section
+                    task.inputs.append(
+                        Link(name=target_port, section=source_node_value)
+                    )
+                else:
+                    # Function node case: use the connection section
+                    connection_section = edge_to_connection_section[i]
+                    task.inputs.append(
+                        Link(name=target_port, section=connection_section)
+                    )
 
-                    # Create input link
-                    task.inputs.append(Link(name=port_name, section=source_section))
-
-    def _add_task_output_connections(
-        self, task, node_id, edges, node_id_to_value_section
-    ):
-        """
-        Add output connections from a task based on workflow edges.
-
-        Each edge where this node is the source creates an output connection.
-        For function nodes, we may need to create additional value sections
-        for different output ports.
-        """
-        # Group edges by sourcePort to handle multiple outputs
-        output_ports = {}
-        for edge in edges:
+        # Add output connections: edges where this node is the source
+        for i, edge in enumerate(edges):
             if edge.get('source') == node_id:
-                source_port = edge.get('sourcePort', INTERNAL_DEFAULT_HANDLE)
-                if source_port == INTERNAL_DEFAULT_HANDLE:
+                source_port = edge.get('sourcePort')
+                # Handle None and INTERNAL_DEFAULT_HANDLE the same way
+                if source_port is None or source_port == INTERNAL_DEFAULT_HANDLE:
                     source_port = 'result'
-
-                if source_port not in output_ports:
-                    output_ports[source_port] = []
-                output_ports[source_port].append(edge)
-
-        # Create output connections for each port
-        for port_name, port_edges in output_ports.items():
-            # Create a value section for this output port if it doesn't exist
-            output_value_section = PythonWorkflowDefinitionValue(
-                name=f'{task.name} - {port_name}',
-                node_id=node_id,
-                node_type='function',
-                port_name=port_name,
-            )
-
-            # Add to workflow values
-            self.workflow_values.append(output_value_section)
-
-            # Create output link from task to this value section
-            task.outputs.append(Link(name=port_name, section=output_value_section))
+                
+                # Use the connection section for this edge
+                connection_section = edge_to_connection_section[i]
+                task.outputs.append(
+                    Link(name=source_port, section=connection_section)
+                )
 
     def load_from_pydantic_model(self, pwd_workflow: PythonWorkflowDefinitionWorkflow):
         """
