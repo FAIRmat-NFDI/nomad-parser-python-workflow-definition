@@ -3,12 +3,13 @@ solution of the poisson equation on the unit square
 """
 
 from argparse import ArgumentParser
+
 import dolfin as df
 
 
 def boundary_expression():
     """Defines the function to be used for the boundary conditions"""
-    return "1.0 + x[0] * x[0] + 2.0 * x[1] * x[1]"
+    return '1.0 + x[0] * x[0] + 2.0 * x[1] * x[1]'
 
 
 def solve_poisson(
@@ -30,7 +31,7 @@ def solve_poisson(
     mesh = df.Mesh()
     with df.XDMFFile(meshfile) as instream:
         instream.read(mesh)
-    func_space = df.FunctionSpace(mesh, "CG", degree)
+    func_space = df.FunctionSpace(mesh, 'CG', degree)
     boundary_data = df.Expression(bc_expression, degree=2)
 
     def boundary(_, on_boundary):
@@ -68,41 +69,41 @@ def solve_and_write_output(
         If True, return number of degrees of freedom.
     """
     discrete_solution = solve_poisson(mesh, degree)
-    discrete_solution.rename("u", discrete_solution.name())
+    discrete_solution.rename('u', discrete_solution.name())
     resultFile = df.File(outputfile)
     resultFile << discrete_solution
 
     dofs = discrete_solution.function_space().dim()
-    print(f"Number of dofs used: {dofs}")
+    print(f'Number of dofs used: {dofs}')
 
     if numdofs is not None:
-        with open(numdofs, "w") as handle:
-            handle.write("{}\n".format(dofs))
+        with open(numdofs, 'w') as handle:
+            handle.write(f'{dofs}\n')
     if return_dofs:
         return dofs
 
 
-if __name__ == "__main__":
-    PARSER = ArgumentParser(description="run script for the poisson problem")
-    PARSER.add_argument("-m", "--mesh", required=True, help="mesh file to be used")
+if __name__ == '__main__':
+    PARSER = ArgumentParser(description='run script for the poisson problem')
+    PARSER.add_argument('-m', '--mesh', required=True, help='mesh file to be used')
     PARSER.add_argument(
-        "-d", "--degree", required=True, help="polynomial order to be used"
+        '-d', '--degree', required=True, help='polynomial order to be used'
     )
     PARSER.add_argument(
-        "-o",
-        "--outputfile",
+        '-o',
+        '--outputfile',
         required=True,
-        help="file name for the output to be written",
+        help='file name for the output to be written',
     )
     PARSER.add_argument(
-        "-n",
-        "--num-dofs",
+        '-n',
+        '--num-dofs',
         required=False,
         default=None,
-        help="file name for the number of DoFs to be written",
+        help='file name for the number of DoFs to be written',
     )
     ARGS = vars(PARSER.parse_args())
 
     solve_and_write_output(
-        ARGS["mesh"], int(ARGS["degree"]), ARGS["outputfile"], ARGS["num_dofs"]
+        ARGS['mesh'], int(ARGS['degree']), ARGS['outputfile'], ARGS['num_dofs']
     )

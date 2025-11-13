@@ -20,10 +20,9 @@ import json
 from pathlib import Path
 
 import pytest
-
 from nomad.datamodel import EntryArchive
-from nomad_parser_pwd.parsers.parser import PythonWorkflowDefinitionParser
 
+from nomad_parser_pwd.parsers.parser import PythonWorkflowDefinitionParser
 
 # Expected counts for test examples
 ARITHMETIC_NODES = 6
@@ -612,16 +611,16 @@ def test_edge_connection_matching_for_nomad_visualization(parser, test_data_path
         )
 
         # Critical assertions for NOMAD graph visualization
-        assert (
-            source_output is not None
-        ), f"Source output '{source_port}' not found on task {edge['source']}"
-        assert (
-            target_input is not None
-        ), f"Target input '{target_port}' not found on task {edge['target']}"
+        assert source_output is not None, (
+            f"Source output '{source_port}' not found on task {edge['source']}"
+        )
+        assert target_input is not None, (
+            f"Target input '{target_port}' not found on task {edge['target']}"
+        )
         assert source_output.section is target_input.section, (
-            f"Edge {edge['source']}:{source_port} -> {edge['target']}:{target_port} "
-            f"connections reference different sections! "
-            f"Source: {id(source_output.section)}, Target: {id(target_input.section)}"
+            f'Edge {edge["source"]}:{source_port} -> {edge["target"]}:{target_port} '
+            f'connections reference different sections! '
+            f'Source: {id(source_output.section)}, Target: {id(target_input.section)}'
         )
 
 
@@ -661,9 +660,9 @@ def test_edge_matching_quantum_espresso(parser, test_data_path):
     ]
 
     # Should have substantial number of function-to-function edges
-    assert (
-        len(function_to_function_edges) > 5
-    ), f'Expected > 5 function-to-function edges, got {len(function_to_function_edges)}'
+    assert len(function_to_function_edges) > 5, (
+        f'Expected > 5 function-to-function edges, got {len(function_to_function_edges)}'
+    )
 
     matching_edges = 0
 
@@ -702,9 +701,9 @@ def test_edge_matching_quantum_espresso(parser, test_data_path):
             matching_edges += 1
 
     # All function-to-function edges should have matching connections
-    assert (
-        matching_edges == len(function_to_function_edges)
-    ), f'Edge matching failed: {matching_edges}/{len(function_to_function_edges)} edges matched'
+    assert matching_edges == len(function_to_function_edges), (
+        f'Edge matching failed: {matching_edges}/{len(function_to_function_edges)} edges matched'
+    )
 
 
 def test_function_to_output_connections_regression(parser, test_data_path):

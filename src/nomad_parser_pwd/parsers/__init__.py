@@ -14,6 +14,6 @@ class PythonWorkflowDefinitionParserEntryPoint(ParserEntryPoint):
 parser_entry_point = PythonWorkflowDefinitionParserEntryPoint(
     name='PythonWorkflowDefinitionParser',
     description='Parser for Python Workflow Definition JSON files.',
-    mainfile_name_re=r'.*/workflow\.json$',
+    mainfile_name_re=r'(^|.*/)workflow\.json$',
     mainfile_mime_re=r'application/json',
 )

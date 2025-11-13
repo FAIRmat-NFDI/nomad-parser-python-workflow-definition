@@ -52,7 +52,7 @@ class PythonWorkflowDefinitionParser(MatchingParser):
             name='parsers/python_workflow_definition',
             code_name='Python Workflow Definition',
             code_homepage='https://github.com/nomad-coe/python-workflow-definition',
-            mainfile_name_re=r'.+\.json$',
+            mainfile_name_re=r'(^|.*/)workflow\.json$',
             mainfile_mime_re=r'application/json',
         )
 
@@ -312,8 +312,9 @@ class PythonWorkflowDefinitionParser(MatchingParser):
         # Handle case where logger is None (e.g., in tests)
         if logger is None:
             from nomad.utils import get_logger
+
             logger = get_logger(__name__)
-            
+
         logger.info('Starting Python Workflow Definition parser')
 
         try:
@@ -338,7 +339,7 @@ class PythonWorkflowDefinitionParser(MatchingParser):
 
                 # Create the NOMAD workflow
                 workflow = PythonWorkflowDefinition()
-                
+
                 # Set workflow name from filename if not provided
                 if not workflow.name:
                     base_name = os.path.splitext(os.path.basename(mainfile))[0]
@@ -353,15 +354,13 @@ class PythonWorkflowDefinitionParser(MatchingParser):
                 # Trigger normalization
                 workflow.normalize(archive, logger)
 
-                logger.info(
-                    'Successfully created Python Workflow Definition from JSON'
-                )
+                logger.info('Successfully created Python Workflow Definition from JSON')
 
                 # Log workflow statistics from the NOMAD structures
                 logger.info(f'Created workflow with {len(workflow.tasks)} tasks')
                 logger.info(f'Workflow inputs: {len(workflow.inputs)}')
                 logger.info(f'Workflow outputs: {len(workflow.outputs)}')
-                
+
                 # Log task details
                 for i, task in enumerate(workflow.tasks):
                     logger.info(

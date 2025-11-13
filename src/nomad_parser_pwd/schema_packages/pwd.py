@@ -334,7 +334,7 @@ class PythonWorkflowDefinition(Workflow):
             node_section = PythonWorkflowDefinitionNode()
             node_section.node_id = node.get('id')
             node_section.node_type = node.get('type')
-            node_section.name = node.get('name', f"{node.get('type')}_{node.get('id')}")
+            node_section.name = node.get('name', f'{node.get("type")}_{node.get("id")}')
 
             # Handle different value types - JSON field expects dict
             node_value = node.get('value')
@@ -371,15 +371,19 @@ class PythonWorkflowDefinition(Workflow):
             source_port = edge.get('sourcePort')
             if source_port is None:
                 source_port = 'result'
-            
+
             target_id = edge.get('target')
             target_node = next((n for n in nodes if n.get('id') == target_id), None)
 
             # Create output port values for function-to-function connections
             # regardless of whether sourcePort is named or 'result'
             source_node = next((n for n in nodes if n.get('id') == source_id), None)
-            if (source_node and source_node.get('type') == 'function' and
-                target_node and target_node.get('type') == 'function'):
+            if (
+                source_node
+                and source_node.get('type') == 'function'
+                and target_node
+                and target_node.get('type') == 'function'
+            ):
                 key = (source_id, source_port)
                 if key not in output_port_values:
                     output_value = PythonWorkflowDefinitionNode()
@@ -398,7 +402,7 @@ class PythonWorkflowDefinition(Workflow):
                 continue
 
             node_id = node.get('id')
-            node_name = f"Function {node.get('value', node_id)}"
+            node_name = f'Function {node.get("value", node_id)}'
 
             # Create task
             task = PythonWorkflowDefinitionTask(
@@ -435,24 +439,25 @@ class PythonWorkflowDefinition(Workflow):
                     source_port = edge.get('sourcePort')
                     if source_port is None:
                         source_port = 'result'
-                    
+
                     target_id = edge.get('target')
-                    target_node = next((n for n in nodes if n.get('id') == target_id), None)
+                    target_node = next(
+                        (n for n in nodes if n.get('id') == target_id), None
+                    )
 
                     # Find the appropriate output section
                     output_section = None
                     if (node_id, source_port) in output_port_values:
                         # Use the shared output port value for function-to-function connections
                         output_section = output_port_values[(node_id, source_port)]
+                    # For 'result' outputs, the behavior depends on target type
+                    elif target_node and target_node.get('type') == 'output':
+                        # Function-to-output: point to the actual output node
+                        output_section = node_to_pwd_node.get(target_id)
                     else:
-                        # For 'result' outputs, the behavior depends on target type
-                        if target_node and target_node.get('type') == 'output':
-                            # Function-to-output: point to the actual output node
-                            output_section = node_to_pwd_node.get(target_id)
-                        else:
-                            # Function-to-function: use shared section (output port value)
-                            # This case should have been handled above, but fallback to target
-                            output_section = node_to_pwd_node.get(target_id)
+                        # Function-to-function: use shared section (output port value)
+                        # This case should have been handled above, but fallback to target
+                        output_section = node_to_pwd_node.get(target_id)
 
                     if output_section:
                         task.outputs.append(
@@ -506,7 +511,7 @@ class PythonWorkflowDefinition(Workflow):
                 continue
 
             node_id = node.get('id')
-            node_name = f"Function {node.get('value', node_id)}"
+            node_name = f'Function {node.get("value", node_id)}'
 
             # Create task
             task = PythonWorkflowDefinitionTask(
