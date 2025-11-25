@@ -35,6 +35,7 @@ Repository = "https://github.com/FAIRmat-NFDI/nomad-parser-pwd"
 
 [project.optional-dependencies]
 dev = ["ruff", "pytest", "structlog"]
+tests = ["pytest", "structlog"]
 pwd = ["python_workflow_definition"]
 
 [tool.ruff]
