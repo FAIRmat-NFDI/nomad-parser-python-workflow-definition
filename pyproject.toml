@@ -122,3 +122,10 @@ schema_package_entry_point = "nomad_parser_pwd.schema_packages:schema_package_en
 [tool.cruft]
 # Avoid updating workflow files, this leads to permissions issues
 skip = [".github/*"]
+
+
+[tool.uv]
+override-dependencies = [
+    "aiida-workgraph>=0.7.0",
+    "aiida-core>=2.6.0"
+]
