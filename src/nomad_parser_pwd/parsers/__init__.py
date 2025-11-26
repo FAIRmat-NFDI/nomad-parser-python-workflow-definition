@@ -2,17 +2,18 @@ from nomad.config.models.plugins import ParserEntryPoint
 from pydantic import Field
 
 
-class NewParserEntryPoint(ParserEntryPoint):
+class PythonWorkflowDefinitionParserEntryPoint(ParserEntryPoint):
     parameter: int = Field(0, description='Custom configuration parameter')
 
     def load(self):
-        from nomad_parser_pwd.parsers.parser import NewParser
+        from nomad_parser_pwd.parsers.parser import PythonWorkflowDefinitionParser
 
-        return NewParser(**self.model_dump())
+        return PythonWorkflowDefinitionParser()
 
 
-parser_entry_point = NewParserEntryPoint(
-    name='NewParser',
-    description='New parser entry point configuration.',
-    mainfile_name_re=r'.*\.newmainfilename',
+parser_entry_point = PythonWorkflowDefinitionParserEntryPoint(
+    name='PythonWorkflowDefinitionParser',
+    description='Parser for Python Workflow Definition JSON files.',
+    mainfile_name_re=r'(^|.*/)workflow\.json$',
+    mainfile_mime_re=r'application/json',
 )
