@@ -364,107 +364,126 @@ class PythonWorkflowDefinition(Workflow):
         # Create a mapping from node_id to PWD node section for easy lookup
         node_to_pwd_node = {v.node_id: v for v in self.pwd_nodes}
 
-        # Create output port values for edges that need them
+        # 1. Pre-calculate output ports for function-to-function edges
+        output_port_values = self._resolve_intermediate_ports(nodes, edges)
+
+        # 2. Create tasks for each function node
+        for node in nodes:
+            if node.get('type') != 'function':
+                continue
+            # We pass 'nodes' here so the output helper can look up target nodes
+            self._create_single_function_task(
+                node, nodes, edges, output_port_values, node_to_pwd_node
+            )
+
+    def _resolve_intermediate_ports(self, nodes, edges):
+        """Identify edges between functions and create intermediate output ports."""
         output_port_values = {}
         for edge in edges:
             source_id = edge.get('source')
-            source_port = edge.get('sourcePort')
-            if source_port is None:
-                source_port = 'result'
-
+            source_port = edge.get('sourcePort') or 'result'
             target_id = edge.get('target')
+
+            source_node = next((n for n in nodes if n.get('id') == source_id), None)
             target_node = next((n for n in nodes if n.get('id') == target_id), None)
 
-            # Create output port values for function-to-function connections
-            # regardless of whether sourcePort is named or 'result'
-            source_node = next((n for n in nodes if n.get('id') == source_id), None)
-            if (
+            # Check if this is a function-to-function connection
+            is_func_to_func = (
                 source_node
                 and source_node.get('type') == 'function'
                 and target_node
                 and target_node.get('type') == 'function'
-            ):
+            )
+
+            if is_func_to_func:
                 key = (source_id, source_port)
                 if key not in output_port_values:
                     output_value = PythonWorkflowDefinitionNode()
-                    output_value.node_id = (
-                        len(self.pwd_nodes) + len(output_port_values) + 1000
-                    )
+                    # Generate a unique ID
+                    new_id = len(self.pwd_nodes) + len(output_port_values) + 1000
+                    output_value.node_id = new_id
                     output_value.node_type = 'output_port'
                     output_value.name = f'{source_id}_{source_port}'
-                    output_value.value = {'port': source_port, 'source_node': source_id}
+                    output_value.value = {
+                        'port': source_port,
+                        'source_node': source_id,
+                    }
 
                     output_port_values[key] = output_value
                     self.pwd_nodes.append(output_value)
+        return output_port_values
 
-        for node in nodes:
-            if node.get('type') != 'function':
+    def _create_single_function_task(
+        self, node, nodes, edges, output_port_values, node_to_pwd_node
+    ):  # noqa: PLR0913
+        """Create and configure a single task from a function node."""
+        node_id = node.get('id')
+        node_name = f'Function {node.get("value", node_id)}'
+
+        task = PythonWorkflowDefinitionTask(
+            name=node_name,
+            node_type='function',
+            node_id=node_id,
+            module_function=node.get('value'),
+        )
+
+        # Helper to find inputs
+        self._add_task_inputs(
+            task, node_id, edges, output_port_values, node_to_pwd_node
+        )
+        # Helper to find outputs (Passing 'nodes' correctly now)
+        self._add_task_outputs(
+            task, nodes, node_id, edges, output_port_values, node_to_pwd_node
+        )
+
+        self.tasks.append(task)
+
+    def _add_task_inputs(
+        self, task, node_id, edges, output_port_values, node_to_pwd_node
+    ):  # noqa: PLR0913
+        """Find edges targeting this node and add them as inputs."""
+        for edge in edges:
+            if edge.get('target') != node_id:
                 continue
 
-            node_id = node.get('id')
-            node_name = f'Function {node.get("value", node_id)}'
+            source_id = edge.get('source')
+            source_port = edge.get('sourcePort') or 'result'
+            target_port = edge.get('targetPort', f'input_{source_id}')
 
-            # Create task
-            task = PythonWorkflowDefinitionTask(
-                name=node_name,
-                node_type='function',
-                node_id=node_id,
-                module_function=node.get('value'),
-            )
+            # Find the appropriate source section
+            source_section = output_port_values.get((source_id, source_port))
+            if not source_section:
+                source_section = node_to_pwd_node.get(source_id)
 
-            # Add input connections based on edges
-            for edge in edges:
-                if edge.get('target') == node_id:
-                    source_id = edge.get('source')
-                    source_port = edge.get('sourcePort')
-                    if source_port is None:
-                        source_port = 'result'
-                    target_port = edge.get('targetPort', f'input_{source_id}')
+            if source_section:
+                task.inputs.append(Link(name=target_port, section=source_section))
 
-                    # Find the appropriate source section
-                    source_section = None
-                    if (source_id, source_port) in output_port_values:
-                        source_section = output_port_values[(source_id, source_port)]
-                    else:
-                        source_section = node_to_pwd_node.get(source_id)
+    def _add_task_outputs( # noqa: PLR0913
+        self, task, nodes, node_id, edges, output_port_values, node_to_pwd_node
+    ):  
+        """Find edges originating from this node and add them as outputs."""
+        for edge in edges:
+            if edge.get('source') != node_id:
+                continue
 
-                    if source_section:
-                        task.inputs.append(
-                            Link(name=target_port, section=source_section)
-                        )
+            source_port = edge.get('sourcePort') or 'result'
+            target_id = edge.get('target')
+            target_node = next((n for n in nodes if n.get('id') == target_id), None)
 
-            # Add output connections based on edges
-            for edge in edges:
-                if edge.get('source') == node_id:
-                    source_port = edge.get('sourcePort')
-                    if source_port is None:
-                        source_port = 'result'
+            # Find the appropriate output section
+            output_section = output_port_values.get((node_id, source_port))
 
-                    target_id = edge.get('target')
-                    target_node = next(
-                        (n for n in nodes if n.get('id') == target_id), None
-                    )
+            # Fallback logic if not in intermediate values
+            if not output_section:
+                if target_node and target_node.get('type') == 'output':
+                    # Function-to-output: point to the actual output node
+                    output_section = node_to_pwd_node.get(target_id)
+                else:
+                    # Fallback to target
+                    output_section = node_to_pwd_node.get(target_id)
 
-                    # Find the appropriate output section
-                    output_section = None
-                    if (node_id, source_port) in output_port_values:
-                        # Use the shared output port value for function-to-function connections
-                        output_section = output_port_values[(node_id, source_port)]
-                    # For 'result' outputs, the behavior depends on target type
-                    elif target_node and target_node.get('type') == 'output':
-                        # Function-to-output: point to the actual output node
-                        output_section = node_to_pwd_node.get(target_id)
-                    else:
-                        # Function-to-function: use shared section (output port value)
-                        # This case should have been handled above, but fallback to target
-                        output_section = node_to_pwd_node.get(target_id)
-
-                    if output_section:
-                        task.outputs.append(
-                            Link(name=source_port, section=output_section)
-                        )
-
-            self.tasks.append(task)
+            if output_section:
+                task.outputs.append(Link(name=source_port, section=output_section))
 
     def _create_node_sections(self, nodes):
         """Create minimal sections for nodes that need Link references."""

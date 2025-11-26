@@ -660,10 +660,12 @@ def test_edge_matching_quantum_espresso(parser, test_data_path):
     ]
 
     # Should have substantial number of function-to-function edges
-    assert len(function_to_function_edges) > 5, (
-        f'Expected > 5 function-to-function edges, got {len(function_to_function_edges)}'
+    min_expected_edges = 5
+    assert len(function_to_function_edges) > min_expected_edges, (
+        f'Expected > {min_expected_edges} function-to-function edges, '
+        f'got {len(function_to_function_edges)}'
     )
-
+    
     matching_edges = 0
 
     # Validate each function-to-function edge
@@ -702,7 +704,8 @@ def test_edge_matching_quantum_espresso(parser, test_data_path):
 
     # All function-to-function edges should have matching connections
     assert matching_edges == len(function_to_function_edges), (
-        f'Edge matching failed: {matching_edges}/{len(function_to_function_edges)} edges matched'
+        f'Edge matching failed: {matching_edges}/'
+        f'{len(function_to_function_edges)} edges matched'
     )
 
 
