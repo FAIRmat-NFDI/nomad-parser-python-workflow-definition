@@ -127,5 +127,6 @@ skip = [".github/*"]
 [tool.uv]
 override-dependencies = [
     "aiida-workgraph>=0.7.0",
-    "aiida-core>=2.6.0"
+    "aiida-core>=2.6.0",
+    "pytz>=2022.7.1"
 ]
