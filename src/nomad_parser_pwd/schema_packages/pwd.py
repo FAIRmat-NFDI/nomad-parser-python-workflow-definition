@@ -228,6 +228,16 @@ class PythonWorkflowDefinitionTask(Task):
         ),
     )
 
+    working_directory = Quantity(
+        type=str, description='The file directory where the task was executed.'
+    )
+
+    output = Quantity(
+        type=JSON,
+        description='Key output results (structure, energy, volume) '
+        'stored as a dictionary.',
+    )
+
 
 class PythonWorkflowDefinition(Workflow):
     """
@@ -427,6 +437,20 @@ class PythonWorkflowDefinition(Workflow):
             module_function=node.get('value'),
         )
 
+        # Extract new fields directly from the JSON node dictionary
+        if 'working_directory' in node:
+            task.working_directory = node['working_directory']
+
+        if 'output' in node:
+            # NOMAD JSON quantity strictly requires a dictionary.
+            # We wrap lists, strings, and other non-dict types into a dictionary.
+            output_val = node['output']
+
+            if output_val is not None and not isinstance(output_val, dict):
+                output_val = {'value': output_val}
+
+            task.output = output_val
+
         # Helper to find inputs
         self._add_task_inputs(
             task, node_id, edges, output_port_values, node_to_pwd_node
@@ -458,9 +482,9 @@ class PythonWorkflowDefinition(Workflow):
             if source_section:
                 task.inputs.append(Link(name=target_port, section=source_section))
 
-    def _add_task_outputs( # noqa: PLR0913
+    def _add_task_outputs(  # noqa: PLR0913
         self, task, nodes, node_id, edges, output_port_values, node_to_pwd_node
-    ):  
+    ):
         """Find edges originating from this node and add them as outputs."""
         for edge in edges:
             if edge.get('source') != node_id:
