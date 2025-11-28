@@ -344,10 +344,11 @@ class PythonWorkflowDefinitionParser(MatchingParser):
                     base_name = os.path.splitext(os.path.basename(mainfile))[0]
                     workflow.name = f'Python Workflow Definition: {base_name}'
 
-                # Load directly from JSON dict to preserve new fields
-                # ('output', 'working_directory')
-                # that might be stripped by the strict Pydantic model
-                workflow.load_from_pydantic_model(json.loads(file_content))
+                # Validate using the Pydantic model
+                data = PythonWorkflowDefinitionWorkflow.load_json_str(file_content)
+
+                # Load into the NOMAD section
+                workflow.load_from_pydantic_model(data)
 
                 # Set the workflow in the archive
                 archive.workflow2 = workflow
