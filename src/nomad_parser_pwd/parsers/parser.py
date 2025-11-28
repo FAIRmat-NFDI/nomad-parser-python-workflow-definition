@@ -451,6 +451,12 @@ class PythonWorkflowDefinitionParser(MatchingParser):
                     base_name = os.path.splitext(os.path.basename(mainfile))[0]
                     workflow.name = f'Python Workflow Definition: {base_name}'
 
+<<<<<<< HEAD
+=======
+                # Validate using the Pydantic model
+                data = PythonWorkflowDefinitionWorkflow.load_json_str(file_content)
+
+>>>>>>> 9450628 (refactor: use upstream library validation instead of json workaround)
                 # Load into the NOMAD section
                 workflow.load_from_pydantic_model(data)
 
