@@ -665,7 +665,7 @@ def test_edge_matching_quantum_espresso(parser, test_data_path):
         f'Expected > {min_expected_edges} function-to-function edges, '
         f'got {len(function_to_function_edges)}'
     )
-    
+
     matching_edges = 0
 
     # Validate each function-to-function edge
@@ -784,3 +784,55 @@ def test_function_to_output_connections_regression(parser, test_data_path):
             f'Task output should point to target node 5, not task 2. '
             f'Expected: {id(target_node)}, Got: {id(task_output.section)}'
         )
+
+
+def test_parsing_new_quantities(parser, test_data_path):
+    """
+    Test parsing of the new 'working_directory' and 'output' quantities.
+    Uses the 'pwd' example data which contains these fields.
+    """
+    # Locate the file
+    workflow_json_path = test_data_path / 'data_export' / 'workflow.json'
+
+    # Safety check: Skip if the file hasn't been created/copied yet
+    if not workflow_json_path.exists():
+        pytest.skip(
+            f'Test data not found at {workflow_json_path}. Please create it first.'
+        )
+
+    # Parse the file
+    archive = EntryArchive()
+    parser.parse(str(workflow_json_path), archive, None)
+
+    workflow = archive.workflow2
+    assert workflow is not None
+
+    # Iterate through tasks and verify our new data exists
+    tasks_with_new_data = 0
+
+    for task in workflow.tasks:
+        # Check 'working_directory' (Should be a string)
+        if task.working_directory:
+            assert isinstance(task.working_directory, str)
+            # Our mock generator used "/home/nomad/", so we check for that
+            assert '/home/nomad/' in task.working_directory
+            tasks_with_new_data += 1
+
+        # Check 'output' (Should be a Dictionary/JSON)
+        if task.output:
+            assert isinstance(task.output, dict)
+
+            # If it's a calculation node, it should have specific keys
+            # (We check for keys we know we injected: energy, volume, structure)
+            if 'energy' in task.output:
+                assert isinstance(task.output['energy'], float)
+            if 'volume' in task.output:
+                assert isinstance(task.output['volume'], float)
+            if 'structure' in task.output:
+                # Structure is stored as a JSON string inside the dict
+                assert isinstance(task.output['structure'], str)
+
+    # Final Verdict: Did we actually find any data?
+    assert tasks_with_new_data > 0, (
+        'Parser returned 0 tasks with working_directory! Check parser.py logic.'
+    )

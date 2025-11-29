@@ -1,0 +1,649 @@
+{
+    "version": "0.1.0",
+    "nodes": [
+        {
+            "id": 0,
+            "type": "function",
+            "value": "workflow.plot_energy_volume_curve",
+            "output": "path/to/fake_plot.png",
+            "working_directory": "/home/nomad/mock_plot_0"
+        },
+        {
+            "id": 1,
+            "type": "function",
+            "value": "python_workflow_definition.shared.get_list",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 2,
+            "type": "function",
+            "value": "workflow.calculate_qe",
+            "output": {
+                "energy": -999.7710890491938,
+                "volume": 60.19964350590513,
+                "structure": "{\"chemical_formula_descriptive\": \"Al4\", \"lattice_vectors\": [[4.05, 0, 0], [0, 4.05, 0], [0, 0, 4.05]], \"species_at_sites\": [\"Al\", \"Al\", \"Al\", \"Al\"], \"cartesian_site_positions\": [[0, 0, 0], [0, 2, 2], [2, 0, 2], [2, 2, 0]]}"
+            },
+            "working_directory": "/home/nomad/mock_calculation_2"
+        },
+        {
+            "id": 3,
+            "type": "function",
+            "value": "python_workflow_definition.shared.get_dict",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 4,
+            "type": "function",
+            "value": "workflow.generate_structures",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 5,
+            "type": "function",
+            "value": "workflow.calculate_qe",
+            "output": {
+                "energy": -999.8551824353234,
+                "volume": 60.67084206901726,
+                "structure": "{\"chemical_formula_descriptive\": \"Al4\", \"lattice_vectors\": [[4.05, 0, 0], [0, 4.05, 0], [0, 0, 4.05]], \"species_at_sites\": [\"Al\", \"Al\", \"Al\", \"Al\"], \"cartesian_site_positions\": [[0, 0, 0], [0, 2, 2], [2, 0, 2], [2, 2, 0]]}"
+            },
+            "working_directory": "/home/nomad/mock_calculation_5"
+        },
+        {
+            "id": 6,
+            "type": "function",
+            "value": "python_workflow_definition.shared.get_dict",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 7,
+            "type": "function",
+            "value": "workflow.get_bulk_structure",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 8,
+            "type": "function",
+            "value": "workflow.calculate_qe",
+            "output": {
+                "energy": -999.780719429555,
+                "volume": 60.28071300843395,
+                "structure": "{\"chemical_formula_descriptive\": \"Al4\", \"lattice_vectors\": [[4.05, 0, 0], [0, 4.05, 0], [0, 0, 4.05]], \"species_at_sites\": [\"Al\", \"Al\", \"Al\", \"Al\"], \"cartesian_site_positions\": [[0, 0, 0], [0, 2, 2], [2, 0, 2], [2, 2, 0]]}"
+            },
+            "working_directory": "/home/nomad/mock_calculation_8"
+        },
+        {
+            "id": 9,
+            "type": "function",
+            "value": "python_workflow_definition.shared.get_dict",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 10,
+            "type": "function",
+            "value": "workflow.calculate_qe",
+            "output": {
+                "energy": -999.5266078717375,
+                "volume": 60.03839945275883,
+                "structure": "{\"chemical_formula_descriptive\": \"Al4\", \"lattice_vectors\": [[4.05, 0, 0], [0, 4.05, 0], [0, 0, 4.05]], \"species_at_sites\": [\"Al\", \"Al\", \"Al\", \"Al\"], \"cartesian_site_positions\": [[0, 0, 0], [0, 2, 2], [2, 0, 2], [2, 2, 0]]}"
+            },
+            "working_directory": "/home/nomad/mock_calculation_10"
+        },
+        {
+            "id": 11,
+            "type": "function",
+            "value": "python_workflow_definition.shared.get_dict",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 12,
+            "type": "function",
+            "value": "workflow.calculate_qe",
+            "output": {
+                "energy": -999.5604595589567,
+                "volume": 60.76598342716833,
+                "structure": "{\"chemical_formula_descriptive\": \"Al4\", \"lattice_vectors\": [[4.05, 0, 0], [0, 4.05, 0], [0, 0, 4.05]], \"species_at_sites\": [\"Al\", \"Al\", \"Al\", \"Al\"], \"cartesian_site_positions\": [[0, 0, 0], [0, 2, 2], [2, 0, 2], [2, 2, 0]]}"
+            },
+            "working_directory": "/home/nomad/mock_calculation_12"
+        },
+        {
+            "id": 13,
+            "type": "function",
+            "value": "python_workflow_definition.shared.get_dict",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 14,
+            "type": "function",
+            "value": "workflow.calculate_qe",
+            "output": {
+                "energy": -999.2794809045025,
+                "volume": 60.5205997481268,
+                "structure": "{\"chemical_formula_descriptive\": \"Al4\", \"lattice_vectors\": [[4.05, 0, 0], [0, 4.05, 0], [0, 0, 4.05]], \"species_at_sites\": [\"Al\", \"Al\", \"Al\", \"Al\"], \"cartesian_site_positions\": [[0, 0, 0], [0, 2, 2], [2, 0, 2], [2, 2, 0]]}"
+            },
+            "working_directory": "/home/nomad/mock_calculation_14"
+        },
+        {
+            "id": 15,
+            "type": "function",
+            "value": "python_workflow_definition.shared.get_dict",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 16,
+            "type": "function",
+            "value": "python_workflow_definition.shared.get_list",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 17,
+            "type": "input",
+            "name": "working_directory_0",
+            "value": "strain_0",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 18,
+            "type": "input",
+            "name": "working_directory_1",
+            "value": "mini",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 19,
+            "type": "input",
+            "name": "element",
+            "value": "Al",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 20,
+            "type": "input",
+            "name": "a",
+            "value": 4.04,
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 21,
+            "type": "input",
+            "name": "cubic",
+            "value": true,
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 22,
+            "type": "input",
+            "name": "pseudopotentials",
+            "value": {
+                "Al": "Al.pbe-n-kjpaw_psl.1.0.0.UPF"
+            },
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 23,
+            "type": "input",
+            "name": "kpts",
+            "value": [
+                3,
+                3,
+                3
+            ],
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 24,
+            "type": "input",
+            "name": "calculation_0",
+            "value": "vc-relax",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 25,
+            "type": "input",
+            "name": "smearing",
+            "value": 0.02,
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 26,
+            "type": "input",
+            "name": "strain_lst",
+            "value": [
+                0.9,
+                0.9500000000000001,
+                1.0,
+                1.05,
+                1.1
+            ],
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 27,
+            "type": "input",
+            "name": "calculation_1",
+            "value": "scf",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 28,
+            "type": "input",
+            "name": "working_directory_2",
+            "value": "strain_1",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 29,
+            "type": "input",
+            "name": "working_directory_3",
+            "value": "strain_2",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 30,
+            "type": "input",
+            "name": "working_directory_4",
+            "value": "strain_3",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 31,
+            "type": "input",
+            "name": "working_directory_5",
+            "value": "strain_4",
+            "output": null,
+            "working_directory": null
+        },
+        {
+            "id": 32,
+            "type": "output",
+            "name": "result",
+            "output": null,
+            "working_directory": null
+        }
+    ],
+    "edges": [
+        {
+            "target": 0,
+            "targetPort": "volume_lst",
+            "source": 1,
+            "sourcePort": null
+        },
+        {
+            "target": 1,
+            "targetPort": "0",
+            "source": 2,
+            "sourcePort": "volume"
+        },
+        {
+            "target": 2,
+            "targetPort": "working_directory",
+            "source": 17,
+            "sourcePort": null
+        },
+        {
+            "target": 2,
+            "targetPort": "input_dict",
+            "source": 3,
+            "sourcePort": null
+        },
+        {
+            "target": 3,
+            "targetPort": "structure",
+            "source": 4,
+            "sourcePort": "s_0"
+        },
+        {
+            "target": 4,
+            "targetPort": "structure",
+            "source": 5,
+            "sourcePort": "structure"
+        },
+        {
+            "target": 5,
+            "targetPort": "working_directory",
+            "source": 18,
+            "sourcePort": null
+        },
+        {
+            "target": 5,
+            "targetPort": "input_dict",
+            "source": 6,
+            "sourcePort": null
+        },
+        {
+            "target": 6,
+            "targetPort": "structure",
+            "source": 7,
+            "sourcePort": null
+        },
+        {
+            "target": 7,
+            "targetPort": "element",
+            "source": 19,
+            "sourcePort": null
+        },
+        {
+            "target": 7,
+            "targetPort": "a",
+            "source": 20,
+            "sourcePort": null
+        },
+        {
+            "target": 7,
+            "targetPort": "cubic",
+            "source": 21,
+            "sourcePort": null
+        },
+        {
+            "target": 6,
+            "targetPort": "pseudopotentials",
+            "source": 22,
+            "sourcePort": null
+        },
+        {
+            "target": 6,
+            "targetPort": "kpts",
+            "source": 23,
+            "sourcePort": null
+        },
+        {
+            "target": 6,
+            "targetPort": "calculation",
+            "source": 24,
+            "sourcePort": null
+        },
+        {
+            "target": 6,
+            "targetPort": "smearing",
+            "source": 25,
+            "sourcePort": null
+        },
+        {
+            "target": 4,
+            "targetPort": "strain_lst",
+            "source": 26,
+            "sourcePort": null
+        },
+        {
+            "target": 3,
+            "targetPort": "pseudopotentials",
+            "source": 22,
+            "sourcePort": null
+        },
+        {
+            "target": 3,
+            "targetPort": "kpts",
+            "source": 23,
+            "sourcePort": null
+        },
+        {
+            "target": 3,
+            "targetPort": "calculation",
+            "source": 27,
+            "sourcePort": null
+        },
+        {
+            "target": 3,
+            "targetPort": "smearing",
+            "source": 25,
+            "sourcePort": null
+        },
+        {
+            "target": 1,
+            "targetPort": "1",
+            "source": 8,
+            "sourcePort": "volume"
+        },
+        {
+            "target": 8,
+            "targetPort": "working_directory",
+            "source": 28,
+            "sourcePort": null
+        },
+        {
+            "target": 8,
+            "targetPort": "input_dict",
+            "source": 9,
+            "sourcePort": null
+        },
+        {
+            "target": 9,
+            "targetPort": "structure",
+            "source": 4,
+            "sourcePort": "s_1"
+        },
+        {
+            "target": 9,
+            "targetPort": "pseudopotentials",
+            "source": 22,
+            "sourcePort": null
+        },
+        {
+            "target": 9,
+            "targetPort": "kpts",
+            "source": 23,
+            "sourcePort": null
+        },
+        {
+            "target": 9,
+            "targetPort": "calculation",
+            "source": 27,
+            "sourcePort": null
+        },
+        {
+            "target": 9,
+            "targetPort": "smearing",
+            "source": 25,
+            "sourcePort": null
+        },
+        {
+            "target": 1,
+            "targetPort": "2",
+            "source": 10,
+            "sourcePort": "volume"
+        },
+        {
+            "target": 10,
+            "targetPort": "working_directory",
+            "source": 29,
+            "sourcePort": null
+        },
+        {
+            "target": 10,
+            "targetPort": "input_dict",
+            "source": 11,
+            "sourcePort": null
+        },
+        {
+            "target": 11,
+            "targetPort": "structure",
+            "source": 4,
+            "sourcePort": "s_2"
+        },
+        {
+            "target": 11,
+            "targetPort": "pseudopotentials",
+            "source": 22,
+            "sourcePort": null
+        },
+        {
+            "target": 11,
+            "targetPort": "kpts",
+            "source": 23,
+            "sourcePort": null
+        },
+        {
+            "target": 11,
+            "targetPort": "calculation",
+            "source": 27,
+            "sourcePort": null
+        },
+        {
+            "target": 11,
+            "targetPort": "smearing",
+            "source": 25,
+            "sourcePort": null
+        },
+        {
+            "target": 1,
+            "targetPort": "3",
+            "source": 12,
+            "sourcePort": "volume"
+        },
+        {
+            "target": 12,
+            "targetPort": "working_directory",
+            "source": 30,
+            "sourcePort": null
+        },
+        {
+            "target": 12,
+            "targetPort": "input_dict",
+            "source": 13,
+            "sourcePort": null
+        },
+        {
+            "target": 13,
+            "targetPort": "structure",
+            "source": 4,
+            "sourcePort": "s_3"
+        },
+        {
+            "target": 13,
+            "targetPort": "pseudopotentials",
+            "source": 22,
+            "sourcePort": null
+        },
+        {
+            "target": 13,
+            "targetPort": "kpts",
+            "source": 23,
+            "sourcePort": null
+        },
+        {
+            "target": 13,
+            "targetPort": "calculation",
+            "source": 27,
+            "sourcePort": null
+        },
+        {
+            "target": 13,
+            "targetPort": "smearing",
+            "source": 25,
+            "sourcePort": null
+        },
+        {
+            "target": 1,
+            "targetPort": "4",
+            "source": 14,
+            "sourcePort": "volume"
+        },
+        {
+            "target": 14,
+            "targetPort": "working_directory",
+            "source": 31,
+            "sourcePort": null
+        },
+        {
+            "target": 14,
+            "targetPort": "input_dict",
+            "source": 15,
+            "sourcePort": null
+        },
+        {
+            "target": 15,
+            "targetPort": "structure",
+            "source": 4,
+            "sourcePort": "s_4"
+        },
+        {
+            "target": 15,
+            "targetPort": "pseudopotentials",
+            "source": 22,
+            "sourcePort": null
+        },
+        {
+            "target": 15,
+            "targetPort": "kpts",
+            "source": 23,
+            "sourcePort": null
+        },
+        {
+            "target": 15,
+            "targetPort": "calculation",
+            "source": 27,
+            "sourcePort": null
+        },
+        {
+            "target": 15,
+            "targetPort": "smearing",
+            "source": 25,
+            "sourcePort": null
+        },
+        {
+            "target": 0,
+            "targetPort": "energy_lst",
+            "source": 16,
+            "sourcePort": null
+        },
+        {
+            "target": 16,
+            "targetPort": "0",
+            "source": 2,
+            "sourcePort": "energy"
+        },
+        {
+            "target": 16,
+            "targetPort": "1",
+            "source": 8,
+            "sourcePort": "energy"
+        },
+        {
+            "target": 16,
+            "targetPort": "2",
+            "source": 10,
+            "sourcePort": "energy"
+        },
+        {
+            "target": 16,
+            "targetPort": "3",
+            "source": 12,
+            "sourcePort": "energy"
+        },
+        {
+            "target": 16,
+            "targetPort": "4",
+            "source": 14,
+            "sourcePort": "energy"
+        },
+        {
+            "target": 32,
+            "targetPort": null,
+            "source": 0,
+            "sourcePort": null
+        }
+    ]
+}
