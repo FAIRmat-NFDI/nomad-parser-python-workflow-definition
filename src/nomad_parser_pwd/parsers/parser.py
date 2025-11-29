@@ -371,9 +371,12 @@ class PythonWorkflowDefinitionParser(MatchingParser):
 
                 # Log task details
                 for i, task in enumerate(workflow.tasks):
+                    # Get attributes that might not exist on the sub-workflow
+                    node_id = getattr(task, 'node_id', 'N/A')
+                    node_type = getattr(task, 'node_type', 'Sub-Workflow')
+
                     logger.info(
-                        f'Task {i}: {task.name} '
-                        f'(node_id={task.node_id}, type={task.node_type})'
+                        f'Task {i}: {task.name} (node_id={node_id}, type={node_type})'
                     )
 
             except Exception as e:
