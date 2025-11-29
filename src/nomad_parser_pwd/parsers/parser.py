@@ -333,7 +333,7 @@ class PythonWorkflowDefinitionParser(MatchingParser):
             # Parse using Pydantic model for validation
             try:
                 # We retain this to ensure the file is valid PWD format
-                PythonWorkflowDefinitionWorkflow.load_json_str(file_content)
+                data = PythonWorkflowDefinitionWorkflow.load_json_str(file_content)
                 logger.info('Successfully validated workflow definition structure')
 
                 # Create the NOMAD workflow
@@ -343,9 +343,6 @@ class PythonWorkflowDefinitionParser(MatchingParser):
                 if not workflow.name:
                     base_name = os.path.splitext(os.path.basename(mainfile))[0]
                     workflow.name = f'Python Workflow Definition: {base_name}'
-
-                # Validate using the Pydantic model
-                data = PythonWorkflowDefinitionWorkflow.load_json_str(file_content)
 
                 # Load into the NOMAD section
                 workflow.load_from_pydantic_model(data)
