@@ -89,6 +89,11 @@ class PythonWorkflowDefinitionParser(MatchingParser):
         if not filename.endswith('/workflow.json') and filename != 'workflow.json':
             return False
 
+        # We search for unique PWD keywords like "nodes" or "edges"
+        # We do this because the buffer might be incomplete.
+        if '"nodes"' in decoded_buffer or "'nodes'" in decoded_buffer:
+            return True
+
         # Only validate JSON structure for initial detection
         # Companion files will be checked during parsing
         return self._validate_pwd_structure(decoded_buffer)
