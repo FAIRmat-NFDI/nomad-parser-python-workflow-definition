@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from structlog.stdlib import BoundLogger
 
 from nomad.config import config
+from nomad.datamodel.metainfo.workflow import TaskReference
 from nomad.parsing.parser import MatchingParser
 from python_workflow_definition.models import PythonWorkflowDefinitionWorkflow
 
@@ -55,6 +56,34 @@ class PythonWorkflowDefinitionParser(MatchingParser):
             mainfile_name_re=r'(^|.*/)workflow\.json$',
             mainfile_mime_re=r'application/json',
         )
+
+    def find_mainfile_in_directory(self, directory_path: str) -> str | None:
+        """
+        Scans a directory for valid NOMAD mainfiles.
+        Prioritizes workflows (*.archive.yaml) over raw calculations.
+        """
+        if not os.path.isdir(directory_path):
+            return None
+
+        try:
+            files = os.listdir(directory_path)
+        except Exception:
+            return None
+
+        # Priority 1: Look for nested workflows
+        for f in files:
+            if f.endswith('workflow.archive.yaml'):
+                return f
+
+        # Priority 2: Look for common simulation outputs
+        # Add more extensions here if needed (e.g., .out for QE, .xml for VASP)
+        common_extensions = ['.out', '.xml', '.json', '.run', '.log', '.wout', '.hdf5']
+        for f in files:
+            for ext in common_extensions:
+                if f.endswith(ext):
+                    return f
+
+        return None
 
     def is_mainfile(
         self,
@@ -293,6 +322,67 @@ class PythonWorkflowDefinitionParser(MatchingParser):
                 missing_files.append('environment.yaml')
             logger.warning(f'Missing required files: {", ".join(missing_files)}')
 
+    def _resolve_task_references(
+        self, workflow: PythonWorkflowDefinition, mainfile: str, logger: 'BoundLogger'
+    ) -> None:
+        """
+        Scan tasks for working directories and convert valid ones to TaskReferences.
+
+        This iterates over the workflow tasks. If a task has a 'working_directory'
+        and a recognized mainfile is found in that directory, the task is replaced
+        with a NOMAD TaskReference linking to that entry.
+        """
+        final_tasks = []
+
+        for task in workflow.tasks:
+            # check if the task has a working_directory
+            work_dir = getattr(task, 'working_directory', None)
+            found_reference = False
+
+            if work_dir:
+                # Construct path: current_dir/work_dir
+                current_dir = os.path.dirname(mainfile)
+                target_dir = os.path.join(current_dir, work_dir)
+
+                # Scan for file
+                found_filename = self.find_mainfile_in_directory(target_dir)
+
+                if found_filename:
+                    # Calculate path relative to upload root
+                    # mainfile path is e.g. "path/to/workflow.json"
+                    # We need "path/to/work_dir/file.out"
+                    rel_dir = os.path.dirname(mainfile)
+                    final_path_in_upload = os.path.join(
+                        rel_dir, work_dir, found_filename
+                    )
+
+                    # Construct Reference String
+                    # ../upload/archive/mainfile/{path}#/workflow2
+                    ref_string = (
+                        f'../upload/archive/mainfile/{final_path_in_upload}#/workflow2'
+                    )
+
+                    logger.info(f"Linking task '{task.name}' to {ref_string}")
+
+                    # Create TaskReference
+                    task_ref = TaskReference()
+                    task_ref.name = task.name
+                    task_ref.task = ref_string
+
+                    # KEEP CONNECTIONS: Copy inputs/outputs from the original task
+                    task_ref.inputs = task.inputs
+                    task_ref.outputs = task.outputs
+
+                    final_tasks.append(task_ref)
+                    found_reference = True
+
+            if not found_reference:
+                # If no file found, keep the original PWD Task
+                final_tasks.append(task)
+
+        # Replace the tasks list with our new list containing references
+        workflow.tasks = final_tasks
+
     def parse(
         self,
         mainfile: str,
@@ -347,6 +437,9 @@ class PythonWorkflowDefinitionParser(MatchingParser):
                 # Load into the NOMAD section
                 workflow.load_from_pydantic_model(data)
 
+                # Resolve links to other entries
+                self._resolve_task_references(workflow, mainfile, logger)
+
                 # Set the workflow in the archive
                 archive.workflow2 = workflow
 
@@ -362,14 +455,13 @@ class PythonWorkflowDefinitionParser(MatchingParser):
 
                 # Log task details
                 for i, task in enumerate(workflow.tasks):
+                    # SAFETY CHECK: TaskReference objects don't have node_id/node_type.
+                    # We use getattr(obj, name, default) to avoid crashing.
+                    node_id = getattr(task, 'node_id', 'N/A')
+                    node_type = getattr(task, 'node_type', 'Linked Reference')
                     logger.info(
-                        f'Task {i}: {task.name} '
-                        f'(node_id={task.node_id}, type={task.node_type})'
+                        f'Task {i}: {task.name} (node_id={node_id}, type={node_type})'
                     )
-
-            except Exception as e:
-                logger.error(f'Failed to validate workflow definition: {e}')
-                raise
 
             except Exception as e:
                 logger.error(f'Failed to validate workflow definition: {e}')
