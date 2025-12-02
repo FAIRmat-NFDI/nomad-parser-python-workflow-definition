@@ -89,6 +89,11 @@ class PythonWorkflowDefinitionParser(MatchingParser):
         if not filename.endswith('/workflow.json') and filename != 'workflow.json':
             return False
 
+        # We search for unique PWD keywords like "nodes" or "edges"
+        # We do this because the buffer might be incomplete.
+        if '"nodes"' in decoded_buffer or "'nodes'" in decoded_buffer:
+            return True
+
         # Only validate JSON structure for initial detection
         # Companion files will be checked during parsing
         return self._validate_pwd_structure(decoded_buffer)
@@ -362,9 +367,12 @@ class PythonWorkflowDefinitionParser(MatchingParser):
 
                 # Log task details
                 for i, task in enumerate(workflow.tasks):
+                    # Get attributes that might not exist on the sub-workflow
+                    node_id = getattr(task, 'node_id', 'N/A')
+                    node_type = getattr(task, 'node_type', 'Sub-Workflow')
+
                     logger.info(
-                        f'Task {i}: {task.name} '
-                        f'(node_id={task.node_id}, type={task.node_type})'
+                        f'Task {i}: {task.name} (node_id={node_id}, type={node_type})'
                     )
 
             except Exception as e:

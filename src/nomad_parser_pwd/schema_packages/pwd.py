@@ -300,7 +300,16 @@ class PythonWorkflowDefinition(Workflow):
     def n_edges(self) -> int:
         """Get the number of edges by counting task connections."""
         edge_count = 0
+
+        # Helper to flatten the task list
+        all_tasks = []
         for task in self.tasks:
+            if getattr(task, 'name', '') == 'Utility Functions':
+                all_tasks.extend(task.tasks)
+            else:
+                all_tasks.append(task)
+
+        for task in all_tasks:
             edge_count += len(task.inputs) + len(task.outputs)
         return edge_count
 
@@ -308,7 +317,14 @@ class PythonWorkflowDefinition(Workflow):
     def n_function_nodes(self) -> int:
         """Get the number of function nodes."""
         # Function nodes are represented as tasks
-        return len(self.tasks)
+        # We must count tasks in the main workflow AND the utility sub-workflow
+        count = 0
+        for task in self.tasks:
+            if getattr(task, 'name', '') == 'Utility Functions':
+                count += len(task.tasks)
+            else:
+                count += 1
+        return count
 
     def normalize(self, archive, logger):
         """
@@ -319,9 +335,38 @@ class PythonWorkflowDefinition(Workflow):
         """
         super().normalize(archive, logger)
 
-        # The workflow is populated by the parser directly from the JSON structure
-        # No additional processing needed here since the parser extracts
-        # structured data directly into the schema quantities
+        # If there are no tasks, there is nothing to reorganize
+        if not self.tasks:
+            return
+
+        # Bucket tasks into Main vs Utility (Sub-workflow)
+        main_tasks = []
+        utility_tasks = []
+
+        for task in self.tasks:
+            # We check if the task has a working_directory set.
+            # If it has a directory, it produced files (Main).
+            # If it is None/Empty, it is a helper (Utility).
+            if hasattr(task, 'working_directory') and task.working_directory:
+                main_tasks.append(task)
+            else:
+                utility_tasks.append(task)
+
+        # If we found utility tasks, move them into a Sub-Workflow
+        if utility_tasks:
+            logger.info(
+                f'Grouping {len(utility_tasks)} utility tasks\
+                         into a sub-workflow.'
+            )
+
+            # Create a new Workflow object to hold the utilities
+            utility_sub_workflow = Workflow(
+                name='Utility Functions', tasks=utility_tasks
+            )
+
+            # Update the Main Workflow structure
+            # The new task list is the main tasks + the utility container
+            self.tasks = main_tasks + [utility_sub_workflow]
 
     def _create_nomad_workflow_structure(self, nodes, edges):
         """
@@ -693,9 +738,17 @@ class PythonWorkflowDefinition(Workflow):
                     }
                 )
 
+            # Flatten the task list to find all function nodes
+            all_tasks = []
+            for task in self.tasks:
+                if getattr(task, 'name', '') == 'Utility Functions':
+                    all_tasks.extend(task.tasks)
+                else:
+                    all_tasks.append(task)
+
             # Reconstruct function nodes from tasks
             max_io_id = len(self.inputs) + len(self.outputs)
-            for i, task in enumerate(self.tasks):
+            for i, task in enumerate(all_tasks):
                 nodes.append(
                     {
                         'id': max_io_id + i + 1,
