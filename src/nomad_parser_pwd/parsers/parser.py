@@ -328,7 +328,11 @@ class PythonWorkflowDefinitionParser(MatchingParser):
             logger.warning(f'Missing required files: {", ".join(missing_files)}')
 
     def _resolve_task_references(
-        self, workflow: PythonWorkflowDefinition, mainfile: str, logger: 'BoundLogger'
+        self,
+        workflow: PythonWorkflowDefinition,
+        mainfile: str,
+        archive: 'EntryArchive',
+        logger: 'BoundLogger',
     ) -> None:
         """
         Scan tasks for working directories and convert valid ones to TaskReferences.
@@ -348,22 +352,26 @@ class PythonWorkflowDefinitionParser(MatchingParser):
                 # Clean the path: get only the folder name, ignoring absolute paths
                 clean_work_dir = os.path.basename(os.path.normpath(work_dir))
 
-                # Construct path: current_dir/work_dir
-                current_dir = os.path.dirname(mainfile)
-                target_dir = os.path.join(current_dir, clean_work_dir)
+                # Construct absolute path for SCANNING (using mainfile system path)
+                current_sys_dir = os.path.dirname(mainfile)
+                target_sys_dir = os.path.join(current_sys_dir, clean_work_dir)
 
                 # Scan for file
-                found_filename = self.find_mainfile_in_directory(target_dir)
+                found_filename = self.find_mainfile_in_directory(target_sys_dir)
 
                 if found_filename:
-                    # Calculate path relative to upload root
-                    # mainfile path is e.g. "path/to/workflow.json"
-                    rel_dir = os.path.dirname(mainfile)
+                    # Calculate path relative to upload root for LINKING
+                    # We use archive.metadata.mainfile instead of 'mainfile' string
+                    # to avoid getting the internal server path (.volumes/...)
+                    workflow_rel_dir = os.path.dirname(archive.metadata.mainfile)
 
                     # Use clean_work_dir here to ensure the link path is correct
                     final_path_in_upload = os.path.join(
-                        rel_dir, clean_work_dir, found_filename
+                        workflow_rel_dir, clean_work_dir, found_filename
                     )
+
+                    # Ensure forward slashes for URLs/Links even on Windows
+                    final_path_in_upload = final_path_in_upload.replace('\\', '/')
 
                     # Construct Reference String
                     # ../upload/archive/mainfile/{path}#/workflow2
@@ -447,7 +455,7 @@ class PythonWorkflowDefinitionParser(MatchingParser):
                 workflow.load_from_pydantic_model(data)
 
                 # Resolve links to other entries
-                self._resolve_task_references(workflow, mainfile, logger)
+                self._resolve_task_references(workflow, mainfile, archive, logger)
 
                 # Set the workflow in the archive
                 archive.workflow2 = workflow
