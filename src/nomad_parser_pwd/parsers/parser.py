@@ -122,7 +122,7 @@ class PythonWorkflowDefinitionParser(MatchingParser):
         # We do this because the buffer might be incomplete due to chunking
         if '"nodes"' in decoded_buffer or "'nodes'" in decoded_buffer:
             return True
-        
+
         # Only validate JSON structure for initial detection
         # Companion files will be checked during parsing
         return self._validate_pwd_structure(decoded_buffer)
