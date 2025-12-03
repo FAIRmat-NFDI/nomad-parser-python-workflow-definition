@@ -340,9 +340,12 @@ class PythonWorkflowDefinitionParser(MatchingParser):
             found_reference = False
 
             if work_dir:
+                # Clean the path: get only the folder name, ignoring absolute paths
+                clean_work_dir = os.path.basename(os.path.normpath(work_dir))
+
                 # Construct path: current_dir/work_dir
                 current_dir = os.path.dirname(mainfile)
-                target_dir = os.path.join(current_dir, work_dir)
+                target_dir = os.path.join(current_dir, clean_work_dir)
 
                 # Scan for file
                 found_filename = self.find_mainfile_in_directory(target_dir)
@@ -350,10 +353,11 @@ class PythonWorkflowDefinitionParser(MatchingParser):
                 if found_filename:
                     # Calculate path relative to upload root
                     # mainfile path is e.g. "path/to/workflow.json"
-                    # We need "path/to/work_dir/file.out"
                     rel_dir = os.path.dirname(mainfile)
+
+                    # Use clean_work_dir here to ensure the link path is correct
                     final_path_in_upload = os.path.join(
-                        rel_dir, work_dir, found_filename
+                        rel_dir, clean_work_dir, found_filename
                     )
 
                     # Construct Reference String
