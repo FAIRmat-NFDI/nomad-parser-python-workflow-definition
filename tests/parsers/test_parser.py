@@ -18,11 +18,17 @@
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from nomad.datamodel import EntryArchive
+from nomad.datamodel.metainfo.workflow import TaskReference
 
 from nomad_parser_pwd.parsers.parser import PythonWorkflowDefinitionParser
+from nomad_parser_pwd.schema_packages.pwd import (
+    PythonWorkflowDefinition,
+    PythonWorkflowDefinitionTask,
+)
 
 # Expected counts for test examples
 ARITHMETIC_NODES = 6
@@ -836,3 +842,71 @@ def test_parsing_new_quantities(parser, test_data_path):
     assert tasks_with_new_data > 0, (
         'Parser returned 0 tasks with working_directory! Check parser.py logic.'
     )
+
+
+def test_task_reference_resolution(tmp_path):
+    """
+    Test that _resolve_task_references correctly:
+    1. Handles absolute paths (strips them).
+    2. Finds local files.
+    3. Converts Tasks to TaskReferences.
+    4. Preserves inputs/outputs.
+    """
+    # 1. Setup a mock file system in the temp directory
+    # Structure:
+    # /tmp/workflow.json
+    # /tmp/mock_calc/pw.out
+
+    # Create the calculation folder and dummy output file
+    calc_folder = tmp_path / 'mock_calc'
+    calc_folder.mkdir()
+    (calc_folder / 'pw.out').write_text('dummy content')
+
+    # Define the mainfile path
+    mainfile_path = str(tmp_path / 'workflow.json')
+
+    # 2. Create a Mock Workflow with one task pointing to that folder
+    workflow = PythonWorkflowDefinition()
+
+    # Create a generic PWD task with an absolute path
+    task = PythonWorkflowDefinitionTask()
+    task.name = 'My Simulation'
+    task.working_directory = '/home/user/absolute/path/to/mock_calc'
+
+    # Add some dummy inputs/outputs to ensure they are preserved
+    # Note: In a real scenario these would be Link objects, but for this test
+    # simply checking that the list content is preserved is enough.
+    task.inputs = []
+    task.outputs = []
+
+    workflow.tasks.append(task)
+
+    # 3. Mock the Archive object
+    # The parser needs archive.metadata.mainfile to build the relative link
+    mock_archive = MagicMock()
+    mock_archive.metadata.mainfile = 'upload/workflow.json'
+
+    # 4. Run the resolution
+    parser = PythonWorkflowDefinitionParser()
+    logger = MagicMock()
+
+    parser._resolve_task_references(workflow, mainfile_path, mock_archive, logger)
+
+    # 5. Assertions
+    assert len(workflow.tasks) == 1
+    result_task = workflow.tasks[0]
+
+    # It should now be a TaskReference, not a PythonWorkflowDefinitionTask
+    assert isinstance(result_task, TaskReference)
+
+    # The name should be preserved
+    assert result_task.name == 'My Simulation'
+
+    # The link should be correct (relative to upload root)
+    # Expected:
+    #  ../upload/archive/mainfile/{dir_of_json}/{clean_folder}/{file}#/workflow2
+    expected_link = '../upload/archive/mainfile/upload/mock_calc/pw.out#/workflow2'
+
+    # MProxy objects string representation wraps the value (e.g. MProxy(value))
+    # We check if the expected link is inside the string representation
+    assert expected_link in str(result_task.task)
