@@ -19,6 +19,7 @@
 import logging
 from typing import Any
 
+import networkx as nx
 from nomad.datamodel.data import ArchiveSection
 from nomad.datamodel.metainfo.workflow import Link, Task, Workflow
 from nomad.metainfo import JSON, Package, Quantity, Section, SubSection
@@ -331,42 +332,98 @@ class PythonWorkflowDefinition(Workflow):
         Normalize the Python workflow definition.
 
         This method processes the workflow definition and creates appropriate
-        NOMAD workflow structures from the Python workflow definition.
+        NOMAD workflow structures. It uses graph topology to identify
+        'Main' tasks vs 'Utility' tasks.
         """
         super().normalize(archive, logger)
 
-        # If there are no tasks, there is nothing to reorganize
         if not self.tasks:
             return
 
-        # Bucket tasks into Main vs Utility (Sub-workflow)
+        # Build graph to understand topology
+        graph = self._build_task_graph()
+
+        # Classify tasks into Main (keep) and Utility (hide)
+        main_tasks, utility_tasks = self._classify_tasks(graph, logger)
+
+        # Create sub-workflow if needed
+        if utility_tasks:
+            self._create_utility_subworkflow(main_tasks, utility_tasks, logger)
+
+    def _build_task_graph(self) -> nx.DiGraph:
+        """Construct a directed graph representing task dependencies."""
+        graph = nx.DiGraph()
+
+        # Map sections back to tasks for edge construction
+        # (We need to know which Task owns a specific Input/Output section)
+        section_to_task_map = {}
+        for task in self.tasks:
+            graph.add_node(task.node_id, obj=task)
+            section_to_task_map[task] = task.node_id
+
+            # Map output sections to their parent task
+            for output in task.outputs:
+                if output.section:
+                    section_to_task_map[output.section] = task.node_id
+
+        # Add Edges based on connections
+        for task in self.tasks:
+            target_node_id = task.node_id
+            for input_link in task.inputs:
+                if input_link.section:
+                    source_node_id = section_to_task_map.get(input_link.section)
+                    # Add edge if connection exists and is not a self-loop
+                    if source_node_id is not None and source_node_id != target_node_id:
+                        graph.add_edge(source_node_id, target_node_id)
+        return graph
+
+    def _classify_tasks(self, graph: nx.DiGraph, logger) -> tuple[list, list]:
+        """Separate tasks into main and utility based on heuristics."""
         main_tasks = []
         utility_tasks = []
 
+        # Heuristic Configuration
+        degree_hub_threshold = 4
+        degrees = dict(graph.degree())
+
         for task in self.tasks:
-            # We check if the task has a working_directory set.
-            # If it has a directory, it produced files (Main).
-            # If it is None/Empty, it is a helper (Utility).
+            is_main = False
+
+            # Criterion 1: Data Producer (Simulation / Heavy computation)
+            # Checks if the task created a physical directory/files
             if hasattr(task, 'working_directory') and task.working_directory:
+                is_main = True
+
+            # Criterion 2: Structural Hub
+            # If a task connects many other tasks, it is structurally significant
+            elif degrees.get(task.node_id, 0) > degree_hub_threshold:
+                is_main = True
+                logger.info(
+                    f'Task {task.name} kept as Main (Hub detected, '
+                    f'Degree: {degrees.get(task.node_id)})'
+                )
+
+            if is_main:
                 main_tasks.append(task)
             else:
                 utility_tasks.append(task)
 
-        # If we found utility tasks, move them into a Sub-Workflow
-        if utility_tasks:
-            logger.info(
-                f'Grouping {len(utility_tasks)} utility tasks\
-                         into a sub-workflow.'
-            )
+        return main_tasks, utility_tasks
 
-            # Create a new Workflow object to hold the utilities
-            utility_sub_workflow = Workflow(
-                name='Utility Functions', tasks=utility_tasks
-            )
+    def _create_utility_subworkflow(self, main_tasks, utility_tasks, logger):
+        """Move utility tasks into a dedicated sub-workflow."""
+        logger.info(
+            f'Grouping {len(utility_tasks)} utility tasks into a sub-workflow '
+            f'(Graph based simplification).'
+        )
 
-            # Update the Main Workflow structure
-            # The new task list is the main tasks + the utility container
-            self.tasks = main_tasks + [utility_sub_workflow]
+        utility_sub_workflow = Workflow(
+            name='Utility Functions',
+            tasks=utility_tasks,
+        )
+
+        # Update the Main Workflow structure
+        self.tasks = main_tasks + [utility_sub_workflow]
 
     def _create_nomad_workflow_structure(self, nodes, edges):
         """
