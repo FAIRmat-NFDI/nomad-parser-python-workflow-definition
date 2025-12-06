@@ -935,7 +935,8 @@ def test_task_reference_resolution(tmp_path):
 def test_workflow_simplification(parser, test_data_path):
     """
     Test that the workflow graph is simplified by grouping utility tasks
-    (tasks without working_directory) into a 'Utility Functions' sub-workflow.
+    (tasks without working_directory AND low connectivity) into a
+    'Utility Functions' sub-workflow.
     """
     # Locate the file (using data_export as it contains the working_directory fields)
     workflow_json_path = test_data_path / 'data_export' / 'workflow.json'
@@ -954,12 +955,9 @@ def test_workflow_simplification(parser, test_data_path):
     assert workflow is not None
 
     # 1. Inspect the Top-Level Tasks
-    # We expect "Main Tasks" (with working_dir) + 1 "Utility Functions" Workflow
-
     top_level_tasks = workflow.tasks
 
     # Identify the sub-workflow
-    # We look for the object by name as created in the normalize() method
     utility_workflows = [t for t in top_level_tasks if t.name == 'Utility Functions']
 
     assert len(utility_workflows) == 1, (
@@ -969,38 +967,54 @@ def test_workflow_simplification(parser, test_data_path):
     # Identify Main Tasks at top level
     main_tasks = [t for t in top_level_tasks if t.name != 'Utility Functions']
 
-    # Verify main tasks have working directories
+    # We identify "Hubs" by name here based on the known dataset topology.
+    # In this dataset, 'get_list' and 'generate_structures' are high-degree nodes.
+    known_hubs = [
+        'Function python_workflow_definition.shared.get_list',
+        'Function workflow.generate_structures',
+    ]
+
     for task in main_tasks:
-        # Check if attribute exists and is truthy.
-        assert task.working_directory, (
-            f'Top level task {task.name} missing\
-              working_directory'
+        # Check if it is a file producer
+        has_files = hasattr(task, 'working_directory') and task.working_directory
+
+        # Check if it is a known hub
+        is_hub = task.name in known_hubs
+
+        assert has_files or is_hub, (
+            f"Top level task '{task.name}' is neither a file producer nor a known Hub. "
+            f'It should have been moved to Utility Functions.'
         )
 
-    # 2. Inspect the Sub-Workflow Content
+    # 3. Verify Utility Workflow Content
     utility_workflow = utility_workflows[0]
 
     # Check that it contains tasks
     assert len(utility_workflow.tasks) > 0, 'Utility workflow should not be empty'
 
-    # Verify tasks inside are actually utilities (no working directory)
+    # Verify tasks inside are actually utilities
     for task in utility_workflow.tasks:
+        # Must not have working directory
         if hasattr(task, 'working_directory'):
             assert not task.working_directory, (
-                f'Task {task.name} in utility workflow has \
-                    working_directory: {task.working_directory}'
+                f'Task {task.name} in utility workflow has working_directory'
             )
 
-    # 3. Verify specific counts based on the sample json
-    # (Nodes 0, 2, 5, 8, 10, 12, 14 have working directories -> 7 Main)
-    # (Nodes 1, 3, 4, 6, 7, 9, 11, 13, 15, 16 have null -> 10 Utility)
-    count_main_tasks = 7
-    count_utility_tasks = 10
+        # Must not be a major hub
+        assert task.name not in known_hubs, (
+            f"Hub task '{task.name}' was incorrectly moved to Utility Functions."
+        )
+
+    # 4. Verify specific counts based on the sample json
+    # (Nodes 0, 1, 2, 4, 5, 8, 10, 12, 14, 16 have working directories -> 10 Main)
+    # (Nodes 3, 6, 7, 9, 11, 13, 15 have null -> 7 Utility)
+    count_main_tasks = 10
+    count_utility_tasks = 7
     assert len(main_tasks) == count_main_tasks, (
-        f'\
-        Expected 7 main tasks, got {len(main_tasks)}'
+        f'Expected {count_main_tasks} main tasks (Producers + Hubs),\
+              got {len(main_tasks)}'
     )
     assert len(utility_workflow.tasks) == count_utility_tasks, (
-        f'\
-        Expected 10 utility tasks, got {len(utility_workflow.tasks)}'
+        f'Expected {count_utility_tasks} utility tasks,\
+              got {len(utility_workflow.tasks)}'
     )
