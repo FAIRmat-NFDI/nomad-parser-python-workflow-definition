@@ -57,4 +57,4 @@ A valid upload must contain the following "Companion Files":
 2.  **Upload:** Create a new upload and drop the example files (e.g., files in `tests/data/data_export/`).
 3.  **Visual Verification:**
     * **Graph View:** Open the Workflow entry. You should see a simplified graph where utility nodes are hidden.
-    * **Data Links:** Click on a compute node. If the `working_directory` contains output files, NOMAD will navigate you to that specific file entry.
+    * **Data Links:** To test this feature, we can use the mock simulation directories zipped in the above test data directory. Click on a compute node. If the `working_directory` contains output files, NOMAD will navigate you to that specific file entry.
