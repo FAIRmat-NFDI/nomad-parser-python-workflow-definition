@@ -26,21 +26,40 @@ The plugin extends the schema to make the graph interactive:
 ### C. Robust Parsing
 The parser uses a robust detection mechanism (scanning for `"nodes": [...]`) to identify PWD files. This ensures reliable ingestion even during streaming uploads where standard JSON parsing might fail on partial buffers.
 
-## 4. Installation
+## 4. Development & Installation
 
-This plugin is designed to be installed within a [NOMAD distribution](https://github.com/FAIRmat-NFDI/nomad-distro-dev).
+If you want to develop this plugin locally, you can set up a standalone environment or use the NOMAD development distribution.
 
-1.  **Add to Workspace:**
-    Ensure the plugin is added to your `packages/` directory and registered in `pyproject.toml` as a workspace source:
-    ```toml
-    [tool.uv.sources]
-    nomad-parser-pwd = { workspace = true }
-    ```
-2.  **Install Dependencies:**
-    Run the setup command to install the plugin and its dependencies:
-    ```bash
-    uv sync
-    ```
+### Standalone Setup
+Clone the project and create a virtual environment (Python 3.10, 3.11, or 3.12):
+```sh
+git clone [https://github.com/FAIRmat-NFDI/nomad-parser-python-workflow-definition.git](https://github.com/FAIRmat-NFDI/nomad-parser-python-workflow-definition.git)
+cd nomad-parser-python-workflow-definition
+python3.11 -m venv .pyenv
+. .pyenv/bin/activate
+```
+Upgrade `pip` and install `uv` for faster installation:
+```sh
+pip install --upgrade pip
+pip install uv
+```
+Install the package in editable mode with development dependencies:
+```sh
+uv pip install -e '.[dev]'
+```
+### Development within NOMAD Distribution
+For full integration testing with the NOMAD infrastructure (GUI, North, etc.), we recommend using the dedicated [nomad-distro-dev](https://github.com/FAIRmat-NFDI/nomad-distro-dev) repository. Please refer to that repository for detailed setup instructions.
+
+### Run Tests and Linting
+You can run the tests locally:
+```sh
+python -m pytest -sv tests
+```
+To run linting and auto-formatting (Ruff):
+```sh
+ruff format .
+ruff check . --fix
+```
 
 ## 5. Demo & Usage
 
@@ -53,7 +72,7 @@ A valid upload must contain the following "Companion Files":
 * `environment.yaml` (Dependency definition)
 
 ### Verification Steps
-1.  **Start the GUI:** Run `uv run poe gui start` and navigate to `http://localhost:3000`.
+1.  **Start the GUI:** Run your local NOMAD instance and navigate to the UI.
 2.  **Upload:** Create a new upload and drop the example files (e.g., files in `tests/data/data_export/`).
 3.  **Visual Verification:**
     * **Graph View:** Open the Workflow entry. You should see a simplified graph where utility nodes are hidden.
