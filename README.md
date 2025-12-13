@@ -33,7 +33,7 @@ If you want to develop this plugin locally, you can set up a standalone environm
 ### Standalone Setup
 Clone the project and create a virtual environment (Python 3.10, 3.11, or 3.12):
 ```sh
-git clone [https://github.com/FAIRmat-NFDI/nomad-parser-python-workflow-definition.git](https://github.com/FAIRmat-NFDI/nomad-parser-python-workflow-definition.git)
+git clone https://github.com/FAIRmat-NFDI/nomad-parser-python-workflow-definition.git
 cd nomad-parser-python-workflow-definition
 python3.11 -m venv .pyenv
 . .pyenv/bin/activate
