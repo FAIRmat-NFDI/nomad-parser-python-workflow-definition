@@ -1,118 +1,79 @@
-# nomad-parser-pwd
+# NOMAD Parser for Python Workflow Definition (PWD)
 
-A parser and schema for the Python workflow definition.
+## 1. Introduction & Scope
+The **nomad-parser-python-workflow-definition** is a NOMAD plugin designed to bridge the gap between **NOMAD** and the [**Python Workflow Definition (PWD)**](https://github.com/pythonworkflow/python-workflow-definition) standard.
 
-This `nomad` plugin was generated with `Cookiecutter` along with `@nomad`'s [`cookiecutter-nomad-plugin`](https://github.com/FAIRmat-NFDI/cookiecutter-nomad-plugin) template.
+**Scope:** The plugin enables NOMAD to ingest, parse, and visualize scientific workflows defined in the PWD JSON format. This allows workflows orchestrated by external tools (such as [`pyiron`](https://github.com/pyiron/pyiron), [`AiiDA`](https://github.com/aiidateam/aiida-core), or [`jobflow`](https://github.com/materialsproject/jobflow)) to be archived and explored within the NOMAD interface.
 
-## Development
+## 2. Connecting to PWD
+The plugin connects to PWD by interpreting the standardized JSON graph structure:
+* **Input:** It accepts `workflow.json` files defined by the PWD standard. This standard structure has been slightly adjusted to add new fields (`output` and `working_directory`) to the nodes in the [forked PWD repo](https://github.com/FAIRmat-NFDI/python-workflow-definition) that is used here.
+* **Mapping:** It maps PWD nodes and edges to NOMAD's internal `Workflow` and `Task` schema.
+* **Validation:** It utilizes the upstream [`python-workflow-definition`](https://github.com/FAIRmat-NFDI/python-workflow-definition) library to ensure schema compatibility.
 
-If you want to develop locally this plugin, clone the project and in the plugin folder, create a virtual environment (you can use Python 3.10, 3.11 or 3.12):
+## 3. Key Features & Functionality
+
+### A. Smart Graph Simplification
+Raw PWD graphs often contain many "utility" nodes (e.g., parameter setters, getters) that clutter the visualization. This plugin implements a **Smart Graph Simplification** strategy using `networkx`:
+* **Scientific Tasks:** Nodes that generate files (possess a `working_directory`) or act as topological "Hubs" (high connectivity) remain at the top level.
+* **Utility Functions:** Low-level helper nodes are automatically grouped into a nested sub-workflow named "Utility Functions," ensuring the user sees a clean, high-level view of the scientific process.
+
+### B. Data Linking & Path Resolution
+The plugin extends the schema to make the graph interactive:
+* **Schema Extension:** Adds `working_directory` and `output` fields to capture execution context.
+* **Active Linking:** It resolves absolute paths found in the JSON (e.g., `/home/cluster/...`) relative to the NOMAD upload directory. If a simulation file (e.g., `.out`, `.xml`) is found, the graph node becomes a clickable **TaskReference** linking directly to the data entry.
+
+### C. Robust Parsing
+The parser uses a robust detection mechanism (scanning for `"nodes": [...]`) to identify PWD files. This ensures reliable ingestion even during streaming uploads where standard JSON parsing might fail on partial buffers.
+
+## 4. Development & Installation
+
+If you want to develop this plugin locally, you can set up a standalone environment or use the NOMAD development distribution.
+
+### Standalone Setup
+Clone the project and create a virtual environment (Python 3.10, 3.11, or 3.12):
 ```sh
-git clone https://github.com/FAIRmat-NFDI/nomad-parser-pwd.git
-cd nomad-parser-pwd
+git clone https://github.com/FAIRmat-NFDI/nomad-parser-python-workflow-definition.git
+cd nomad-parser-python-workflow-definition
 python3.11 -m venv .pyenv
 . .pyenv/bin/activate
 ```
-
-Make sure to have `pip` upgraded:
+Upgrade `pip` and install `uv` for faster installation:
 ```sh
 pip install --upgrade pip
-```
-
-We recommend installing `uv` for fast pip installation of the packages:
-```sh
 pip install uv
 ```
-
-Install the `nomad-lab` package:
+Install the package in editable mode with development dependencies:
 ```sh
 uv pip install -e '.[dev]'
 ```
+### Development within NOMAD Distribution
+For full integration testing with the NOMAD infrastructure (GUI, North, etc.), we recommend using the dedicated [nomad-distro-dev](https://github.com/FAIRmat-NFDI/nomad-distro-dev) repository. Please refer to that repository for detailed setup instructions.
 
-### Run the tests
-
-You can run locally the tests:
+### Run Tests and Linting
+You can run the tests locally:
 ```sh
 python -m pytest -sv tests
 ```
-
-where the `-s` and `-v` options toggle the output verbosity.
-
-Our CI/CD pipeline produces a more comprehensive test report using the `pytest-cov` package. You can generate a local coverage report:
+To run linting and auto-formatting (Ruff):
 ```sh
-uv pip install pytest-cov
-python -m pytest --cov=src tests
+ruff format .
+ruff check . --fix
 ```
 
-### Run linting and auto-formatting
+## 5. Demo & Usage
 
-We use [Ruff](https://docs.astral.sh/ruff/) for linting and formatting the code. Ruff auto-formatting is also a part of the GitHub workflow actions. You can run locally:
-```sh
-ruff check .
-ruff format . --check
-```
+To demonstrate the plugin functionality:
 
-### Debugging
+### Prerequisites
+A valid upload must contain the following "Companion Files":
+* `workflow.json` (The graph structure)
+* `workflow.py` (The Python script definition)
+* `environment.yaml` (Dependency definition)
 
-For interactive debugging of the tests, use `pytest` with the `--pdb` flag. We recommend using an IDE for debugging, e.g., _VSCode_. If that is the case, add the following snippet to your `.vscode/launch.json`:
-```json
-{
-  "configurations": [
-      {
-        "name": "<descriptive tag>",
-        "type": "debugpy",
-        "request": "launch",
-        "cwd": "${workspaceFolder}",
-        "program": "${workspaceFolder}/.pyenv/bin/pytest",
-        "justMyCode": true,
-        "env": {
-            "_PYTEST_RAISE": "1"
-        },
-        "args": [
-            "-sv",
-            "--pdb",
-            "<path-to-plugin-tests>",
-        ]
-    }
-  ]
-}
-```
-
-where `<path-to-plugin-tests>` must be changed to the local path to the test module to be debugged.
-
-The settings configuration file `.vscode/settings.json` automatically applies the linting and formatting upon saving the modified file.
-
-### Documentation on Github pages
-
-To view the documentation locally, install the related packages using:
-```sh
-uv pip install -r requirements_docs.txt
-```
-
-Run the documentation server:
-```sh
-mkdocs serve
-```
-
-## Adding this plugin to NOMAD
-
-Currently, NOMAD has two distinct flavors that are relevant depending on your role as an user:
-1. [A NOMAD Oasis](#adding-this-plugin-in-your-nomad-oasis): any user with a NOMAD Oasis instance.
-2. [Local NOMAD installation and the source code of NOMAD](#adding-this-plugin-in-your-local-nomad-installation-and-the-source-code-of-nomad): internal developers.
-
-### Adding this plugin in your NOMAD Oasis
-
-Read the [NOMAD plugin documentation](https://nomad-lab.eu/prod/v1/staging/docs/howto/oasis/plugins_install.html) for all details on how to deploy the plugin on your NOMAD instance.
-
-### Adding this plugin in your local NOMAD installation and the source code of NOMAD
-
-We now recommend using the dedicated [`nomad-distro-dev`](https://github.com/FAIRmat-NFDI/nomad-distro-dev) repository to simplify the process. Please refer to that repository for detailed instructions.
-
-### Template update
-
-We use [`cruft`](https://github.com/cruft/cruft) to update the project based on template changes. To run the check for updates locally, run `cruft update` in the root of the project. More details see the instructions on [`cruft` website](https://cruft.github.io/cruft/#updating-a-project).
-
-## Main contributors
-| Name | E-mail     |
-|------|------------|
-| Joseph Rudzinski | [joseph.rudzinski@physik.hu-berlin.de](mailto:joseph.rudzinski@physik.hu-berlin.de)
+### Verification Steps
+1.  **Start the GUI:** Run your local NOMAD instance and navigate to the UI.
+2.  **Upload:** Create a new upload and drop the example files (e.g., files in `tests/data/data_export/`).
+3.  **Visual Verification:**
+    * **Graph View:** Open the Workflow entry. You should see a simplified graph where utility nodes are hidden.
+    * **Data Links:** To test this feature, we can use the mock simulation directories zipped in the above test data directory. Click on a compute node. If the `working_directory` contains output files, NOMAD will navigate you to that specific file entry.
