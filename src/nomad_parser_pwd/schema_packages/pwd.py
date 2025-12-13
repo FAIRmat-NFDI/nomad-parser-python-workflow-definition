@@ -340,6 +340,12 @@ class PythonWorkflowDefinition(Workflow):
         if not self.tasks:
             return
 
+        # IDEMPOTENCY CHECK: 
+        # If we have already grouped the tasks, do not do it again.
+        # This prevents the double-run crash.
+        if any(getattr(t, 'name', '') == 'Utility Functions' for t in self.tasks):
+            return
+
         # Build graph to understand topology
         graph = self._build_task_graph()
 
@@ -358,6 +364,11 @@ class PythonWorkflowDefinition(Workflow):
         # (We need to know which Task owns a specific Input/Output section)
         section_to_task_map = {}
         for task in self.tasks:
+            # SAFETY CHECK: Only process tasks that have a node_id
+            node_id = getattr(task, 'node_id', None)
+            if node_id is None:
+                continue
+
             graph.add_node(task.node_id, obj=task)
             section_to_task_map[task] = task.node_id
 
@@ -368,7 +379,11 @@ class PythonWorkflowDefinition(Workflow):
 
         # Add Edges based on connections
         for task in self.tasks:
-            target_node_id = task.node_id
+            # Skip tasks without IDs here too
+            target_node_id = getattr(task, 'node_id', None)
+            if target_node_id is None:
+                continue
+            
             for input_link in task.inputs:
                 if input_link.section:
                     source_node_id = section_to_task_map.get(input_link.section)
