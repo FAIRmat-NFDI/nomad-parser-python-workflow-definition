@@ -58,6 +58,20 @@ def test_data_path():
     return Path(__file__).parent.parent / 'data'
 
 
+def get_all_tasks(workflow):
+    """
+    Helper to return a flat list of all tasks, including those inside
+    the 'Utility Functions' sub-workflow.
+    """
+    all_tasks = []
+    for task in workflow.tasks:
+        if getattr(task, 'name', '') == 'Utility Functions':
+            all_tasks.extend(task.tasks)
+        else:
+            all_tasks.append(task)
+    return all_tasks
+
+
 def test_parser_instantiation(parser):
     """Test that the parser can be instantiated."""
     assert parser is not None
@@ -294,6 +308,8 @@ def test_edge_parsing_basic_structure(parser, test_data_path):
     parser.parse(str(workflow_json_path), archive, None)
     workflow = archive.workflow2
 
+    all_tasks = get_all_tasks(workflow)
+
     # Verify NOMAD workflow structures are created
     assert len(workflow.inputs) > 0
     assert len(workflow.outputs) > 0
@@ -302,10 +318,10 @@ def test_edge_parsing_basic_structure(parser, test_data_path):
     # Check that we have the expected number of each type
     assert len(workflow.inputs) >= ARITHMETIC_INPUTS  # x, y inputs
     assert len(workflow.outputs) >= ARITHMETIC_OUTPUTS  # result output
-    assert len(workflow.tasks) >= ARITHMETIC_FUNCTIONS  # function tasks
+    assert len(all_tasks) >= ARITHMETIC_FUNCTIONS  # function tasks
 
     # Check that tasks have the right properties
-    for task in workflow.tasks:
+    for task in all_tasks:
         assert task.node_type == 'function'
         assert task.node_id is not None
         assert task.module_function is not None
@@ -324,7 +340,7 @@ def test_edge_to_connection_mapping(parser, test_data_path):
     workflow = archive.workflow2
 
     edges = raw_data['edges']
-    function_tasks = [t for t in workflow.workflow_tasks if t.node_type == 'function']
+    function_tasks = [t for t in get_all_tasks(workflow) if t.node_type == 'function']
 
     # Verify that each edge creates appropriate connections
     for task in function_tasks:
@@ -353,7 +369,7 @@ def test_port_name_mapping(parser, test_data_path):
     workflow = archive.workflow2
 
     edges = raw_data['edges']
-    function_tasks = [t for t in workflow.workflow_tasks if t.node_type == 'function']
+    function_tasks = [t for t in get_all_tasks(workflow) if t.node_type == 'function']
 
     # Check first function task (get_prod_and_div)
     first_task = function_tasks[0]
@@ -381,9 +397,11 @@ def test_value_section_references(parser, test_data_path):
     parser.parse(str(workflow_json_path), archive, None)
     workflow = archive.workflow2
 
+    all_tasks = get_all_tasks(workflow)
+
     # Collect all valid sections (tasks, input/output task sections)
     valid_sections = set()
-    for task in workflow.tasks:
+    for task in all_tasks:
         valid_sections.add(task)
         # Add input/output task sections
         for input_link in task.inputs:
@@ -401,7 +419,7 @@ def test_value_section_references(parser, test_data_path):
         if workflow_output.section:
             valid_sections.add(workflow_output.section)
 
-    function_tasks = [t for t in workflow.workflow_tasks if t.node_type == 'function']
+    function_tasks = [t for t in all_tasks if t.node_type == 'function']
 
     for task in function_tasks:
         # Check that all input connections reference valid sections
@@ -462,13 +480,14 @@ def test_edge_parsing_complex_workflow(parser, test_data_path):
 
     # Verify comprehensive edge processing
     # Should have created tasks and connections
-    total_entities = len(workflow.tasks) + len(workflow.inputs) + len(workflow.outputs)
+    all_tasks = get_all_tasks(workflow)
+    total_entities = len(all_tasks) + len(workflow.inputs) + len(workflow.outputs)
     assert total_entities >= len(nodes)
     assert workflow.results.n_edges == len(edges)
 
     # Check that all function nodes have corresponding tasks
     function_nodes = [n for n in nodes if n['type'] == 'function']
-    function_tasks = [t for t in workflow.workflow_tasks if t.node_type == 'function']
+    function_tasks = [t for t in all_tasks if t.node_type == 'function']
     assert len(function_tasks) == len(function_nodes)
 
     # Verify total connection count makes sense
@@ -505,7 +524,8 @@ def test_multiple_output_ports(parser, test_data_path):
 
     if len(source_ports) > 1:  # If we have multiple output ports
         # Find the corresponding task
-        task_0 = next((t for t in workflow.workflow_tasks if t.node_id == 0), None)
+        all_tasks = get_all_tasks(workflow)
+        task_0 = next((t for t in all_tasks if t.node_id == 0), None)
         assert task_0 is not None
 
         # Should have output for each source port
@@ -545,7 +565,8 @@ def test_edge_parsing_preserves_values(parser, test_data_path):
 
         if node['type'] == 'function':
             # Find corresponding task
-            task = next((t for t in workflow.tasks if t.node_id == node['id']), None)
+            all_tasks = get_all_tasks(workflow)
+            task = next((t for t in all_tasks if t.node_id == node['id']), None)
             assert task is not None
             assert task.module_function == node['value']
 
@@ -578,12 +599,12 @@ def test_edge_connection_matching_for_nomad_visualization(parser, test_data_path
         for e in edges
         if any(
             t.node_id == e['source']
-            for t in workflow.workflow_tasks
+            for t in get_all_tasks(workflow)
             if t.node_type == 'function'
         )
         and any(
             t.node_id == e['target']
-            for t in workflow.workflow_tasks
+            for t in get_all_tasks(workflow)
             if t.node_type == 'function'
         )
     ]
@@ -591,10 +612,10 @@ def test_edge_connection_matching_for_nomad_visualization(parser, test_data_path
     # Each function-to-function edge must have matching connections
     for edge in function_to_function_edges:
         source_task = next(
-            (t for t in workflow.workflow_tasks if t.node_id == edge['source']), None
+            (t for t in get_all_tasks(workflow) if t.node_id == edge['source']), None
         )
         target_task = next(
-            (t for t in workflow.workflow_tasks if t.node_id == edge['target']), None
+            (t for t in get_all_tasks(workflow) if t.node_id == edge['target']), None
         )
 
         assert source_task is not None, f'Source task not found for edge {edge}'
@@ -655,12 +676,12 @@ def test_edge_matching_quantum_espresso(parser, test_data_path):
         for e in edges
         if any(
             t.node_id == e['source']
-            for t in workflow.workflow_tasks
+            for t in get_all_tasks(workflow)
             if t.node_type == 'function'
         )
         and any(
             t.node_id == e['target']
-            for t in workflow.workflow_tasks
+            for t in get_all_tasks(workflow)
             if t.node_type == 'function'
         )
     ]
@@ -677,10 +698,10 @@ def test_edge_matching_quantum_espresso(parser, test_data_path):
     # Validate each function-to-function edge
     for edge in function_to_function_edges:
         source_task = next(
-            (t for t in workflow.workflow_tasks if t.node_id == edge['source']), None
+            (t for t in get_all_tasks(workflow) if t.node_id == edge['source']), None
         )
         target_task = next(
-            (t for t in workflow.workflow_tasks if t.node_id == edge['target']), None
+            (t for t in get_all_tasks(workflow) if t.node_id == edge['target']), None
         )
 
         if source_task is None or target_task is None:
@@ -763,7 +784,7 @@ def test_function_to_output_connections_regression(parser, test_data_path):
     if node_2_to_5_edge is not None:
         # Find the corresponding function task
         source_task = next(
-            (t for t in workflow.workflow_tasks if t.node_id == FUNCTION_NODE_ID), None
+            (t for t in get_all_tasks(workflow) if t.node_id == FUNCTION_NODE_ID), None
         )
         assert source_task is not None, 'Task for node 2 not found'
 
@@ -816,7 +837,7 @@ def test_parsing_new_quantities(parser, test_data_path):
     # Iterate through tasks and verify our new data exists
     tasks_with_new_data = 0
 
-    for task in workflow.tasks:
+    for task in get_all_tasks(workflow):
         # Check 'working_directory' (Should be a string)
         if task.working_directory:
             assert isinstance(task.working_directory, str)
@@ -910,3 +931,90 @@ def test_task_reference_resolution(tmp_path):
     # MProxy objects string representation wraps the value (e.g. MProxy(value))
     # We check if the expected link is inside the string representation
     assert expected_link in str(result_task.task)
+
+def test_workflow_simplification(parser, test_data_path):
+    """
+    Test that the workflow graph is simplified by grouping utility tasks
+    (tasks without working_directory AND low connectivity) into a
+    'Utility Functions' sub-workflow.
+    """
+    # Locate the file (using data_export as it contains the working_directory fields)
+    workflow_json_path = test_data_path / 'data_export' / 'workflow.json'
+
+    # Safety check consistent with other tests
+    if not workflow_json_path.exists():
+        pytest.skip(
+            f'Test data not found at {workflow_json_path}. Please create it first.'
+        )
+
+    # Parse the file
+    archive = EntryArchive()
+    parser.parse(str(workflow_json_path), archive, None)
+
+    workflow = archive.workflow2
+    assert workflow is not None
+
+    # 1. Inspect the Top-Level Tasks
+    top_level_tasks = workflow.tasks
+
+    # Identify the sub-workflow
+    utility_workflows = [t for t in top_level_tasks if t.name == 'Utility Functions']
+
+    assert len(utility_workflows) == 1, (
+        f"Expected 1 'Utility Functions' sub-workflow, found {len(utility_workflows)}"
+    )
+
+    # Identify Main Tasks at top level
+    main_tasks = [t for t in top_level_tasks if t.name != 'Utility Functions']
+
+    # We identify "Hubs" by name here based on the known dataset topology.
+    # In this dataset, 'get_list' and 'generate_structures' are high-degree nodes.
+    known_hubs = [
+        'Function python_workflow_definition.shared.get_list',
+        'Function workflow.generate_structures',
+    ]
+
+    for task in main_tasks:
+        # Check if it is a file producer
+        has_files = hasattr(task, 'working_directory') and task.working_directory
+
+        # Check if it is a known hub
+        is_hub = task.name in known_hubs
+
+        assert has_files or is_hub, (
+            f"Top level task '{task.name}' is neither a file producer nor a known Hub. "
+            f'It should have been moved to Utility Functions.'
+        )
+
+    # 3. Verify Utility Workflow Content
+    utility_workflow = utility_workflows[0]
+
+    # Check that it contains tasks
+    assert len(utility_workflow.tasks) > 0, 'Utility workflow should not be empty'
+
+    # Verify tasks inside are actually utilities
+    for task in utility_workflow.tasks:
+        # Must not have working directory
+        if hasattr(task, 'working_directory'):
+            assert not task.working_directory, (
+                f'Task {task.name} in utility workflow has working_directory'
+            )
+
+        # Must not be a major hub
+        assert task.name not in known_hubs, (
+            f"Hub task '{task.name}' was incorrectly moved to Utility Functions."
+        )
+
+    # 4. Verify specific counts based on the sample json
+    # (Nodes 0, 1, 2, 4, 5, 8, 10, 12, 14, 16 have working directories -> 10 Main)
+    # (Nodes 3, 6, 7, 9, 11, 13, 15 have null -> 7 Utility)
+    count_main_tasks = 10
+    count_utility_tasks = 7
+    assert len(main_tasks) == count_main_tasks, (
+        f'Expected {count_main_tasks} main tasks (Producers + Hubs),\
+              got {len(main_tasks)}'
+    )
+    assert len(utility_workflow.tasks) == count_utility_tasks, (
+        f'Expected {count_utility_tasks} utility tasks,\
+              got {len(utility_workflow.tasks)}'
+    )

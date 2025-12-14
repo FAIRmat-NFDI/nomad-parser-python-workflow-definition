@@ -19,6 +19,7 @@
 import logging
 from typing import Any
 
+import networkx as nx
 from nomad.datamodel.data import ArchiveSection
 from nomad.datamodel.metainfo.workflow import Link, Task, Workflow
 from nomad.metainfo import JSON, Package, Quantity, Section, SubSection
@@ -300,7 +301,16 @@ class PythonWorkflowDefinition(Workflow):
     def n_edges(self) -> int:
         """Get the number of edges by counting task connections."""
         edge_count = 0
+
+        # Helper to flatten the task list
+        all_tasks = []
         for task in self.tasks:
+            if getattr(task, 'name', '') == 'Utility Functions':
+                all_tasks.extend(task.tasks)
+            else:
+                all_tasks.append(task)
+
+        for task in all_tasks:
             edge_count += len(task.inputs) + len(task.outputs)
         return edge_count
 
@@ -308,20 +318,127 @@ class PythonWorkflowDefinition(Workflow):
     def n_function_nodes(self) -> int:
         """Get the number of function nodes."""
         # Function nodes are represented as tasks
-        return len(self.tasks)
+        # We must count tasks in the main workflow AND the utility sub-workflow
+        count = 0
+        for task in self.tasks:
+            if getattr(task, 'name', '') == 'Utility Functions':
+                count += len(task.tasks)
+            else:
+                count += 1
+        return count
 
     def normalize(self, archive, logger):
         """
         Normalize the Python workflow definition.
 
         This method processes the workflow definition and creates appropriate
-        NOMAD workflow structures from the Python workflow definition.
+        NOMAD workflow structures. It uses graph topology to identify
+        'Main' tasks vs 'Utility' tasks.
         """
         super().normalize(archive, logger)
 
-        # The workflow is populated by the parser directly from the JSON structure
-        # No additional processing needed here since the parser extracts
-        # structured data directly into the schema quantities
+        if not self.tasks:
+            return
+
+        # IDEMPOTENCY CHECK: 
+        # If we have already grouped the tasks, do not do it again.
+        # This prevents the double-run crash.
+        if any(getattr(t, 'name', '') == 'Utility Functions' for t in self.tasks):
+            return
+
+        # Build graph to understand topology
+        graph = self._build_task_graph()
+
+        # Classify tasks into Main (keep) and Utility (hide)
+        main_tasks, utility_tasks = self._classify_tasks(graph, logger)
+
+        # Create sub-workflow if needed
+        if utility_tasks:
+            self._create_utility_subworkflow(main_tasks, utility_tasks, logger)
+
+    def _build_task_graph(self) -> nx.DiGraph:
+        """Construct a directed graph representing task dependencies."""
+        graph = nx.DiGraph()
+
+        # Map sections back to tasks for edge construction
+        # (We need to know which Task owns a specific Input/Output section)
+        section_to_task_map = {}
+        for task in self.tasks:
+            # SAFETY CHECK: Only process tasks that have a node_id
+            node_id = getattr(task, 'node_id', None)
+            if node_id is None:
+                continue
+
+            graph.add_node(task.node_id, obj=task)
+            section_to_task_map[task] = task.node_id
+
+            # Map output sections to their parent task
+            for output in task.outputs:
+                if output.section:
+                    section_to_task_map[output.section] = task.node_id
+
+        # Add Edges based on connections
+        for task in self.tasks:
+            # Skip tasks without IDs here too
+            target_node_id = getattr(task, 'node_id', None)
+            if target_node_id is None:
+                continue
+            
+            for input_link in task.inputs:
+                if input_link.section:
+                    source_node_id = section_to_task_map.get(input_link.section)
+                    # Add edge if connection exists and is not a self-loop
+                    if source_node_id is not None and source_node_id != target_node_id:
+                        graph.add_edge(source_node_id, target_node_id)
+        return graph
+
+    def _classify_tasks(self, graph: nx.DiGraph, logger) -> tuple[list, list]:
+        """Separate tasks into main and utility based on heuristics."""
+        main_tasks = []
+        utility_tasks = []
+
+        # Heuristic Configuration
+        degree_hub_threshold = 4
+        degrees = dict(graph.degree())
+
+        for task in self.tasks:
+            is_main = False
+
+            # Criterion 1: Data Producer (Simulation / Heavy computation)
+            # Checks if the task created a physical directory/files
+            if hasattr(task, 'working_directory') and task.working_directory:
+                is_main = True
+
+            # Criterion 2: Structural Hub
+            # If a task connects many other tasks, it is structurally significant
+            elif degrees.get(task.node_id, 0) > degree_hub_threshold:
+                is_main = True
+                logger.info(
+                    f'Task {task.name} kept as Main (Hub detected, '
+                    f'Degree: {degrees.get(task.node_id)})'
+                )
+
+            if is_main:
+                main_tasks.append(task)
+            else:
+                utility_tasks.append(task)
+
+        return main_tasks, utility_tasks
+
+    def _create_utility_subworkflow(self, main_tasks, utility_tasks, logger):
+        """Move utility tasks into a dedicated sub-workflow."""
+        logger.info(
+            f'Grouping {len(utility_tasks)} utility tasks into a sub-workflow '
+            f'(Graph based simplification).'
+        )
+
+        utility_sub_workflow = Workflow(
+            name='Utility Functions',
+            tasks=utility_tasks,
+        )
+
+        # Update the Main Workflow structure
+        self.tasks = main_tasks + [utility_sub_workflow]
 
     def _create_nomad_workflow_structure(self, nodes, edges):
         """
@@ -693,9 +810,17 @@ class PythonWorkflowDefinition(Workflow):
                     }
                 )
 
+            # Flatten the task list to find all function nodes
+            all_tasks = []
+            for task in self.tasks:
+                if getattr(task, 'name', '') == 'Utility Functions':
+                    all_tasks.extend(task.tasks)
+                else:
+                    all_tasks.append(task)
+
             # Reconstruct function nodes from tasks
             max_io_id = len(self.inputs) + len(self.outputs)
-            for i, task in enumerate(self.tasks):
+            for i, task in enumerate(all_tasks):
                 nodes.append(
                     {
                         'id': max_io_id + i + 1,
