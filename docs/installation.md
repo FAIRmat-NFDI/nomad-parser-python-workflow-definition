@@ -20,7 +20,7 @@ Install the package in editable mode with development dependencies:
 uv pip install -e '.[dev]'
 ```
 ## Development within NOMAD Distribution
-For full integration testing with the NOMAD infrastructure (GUI, North, etc.), we recommend using the dedicated [nomad-distro-dev](https://github.com/FAIRmat-NFDI/nomad-distro-dev) repository. Please refer to that repository for detailed setup instructions.
+For full integration testing with the NOMAD infrastructure (GUI, North, etc.), we recommend using the dedicated [nomad-distro-dev](https://github.com/FAIRmat-NFDI/nomad-distro-dev){:target="_blank" rel="noopener"} repository. Please refer to that repository for detailed setup instructions.
 
 ## Run Tests and Linting
 You can run the tests locally:
