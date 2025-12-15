@@ -1,48 +1,51 @@
-# Welcome to the `nomad-parser-pwd` documentation
+# NOMAD Parser for Python Workflow Definition (PWD)
 
-A parser and schema for the Python workflow definition.
+## Introduction & Scope
+The **nomad-parser-python-workflow-definition** is a NOMAD plugin designed to bridge the gap between **NOMAD** and the [**Python Workflow Definition (PWD)**](https://github.com/pythonworkflow/python-workflow-definition){:target="_blank" rel="noopener"} standard.
 
-## Introduction
+**Scope:** The plugin enables NOMAD to ingest, parse, and visualize scientific workflows defined in the PWD JSON format. This allows workflows orchestrated by external tools (such as [`pyiron`](https://github.com/pyiron/pyiron){:target="_blank" rel="noopener"}, [`AiiDA`](https://github.com/aiidateam/aiida-core){:target="_blank" rel="noopener"}, or [`jobflow`](https://github.com/materialsproject/jobflow){:target="_blank" rel="noopener"}) to be archived and explored within the NOMAD interface.
 
-!!! note "Attention"
-    TODO
+## Connecting to PWD
+The plugin connects to PWD by interpreting the standardized JSON graph structure:
 
-<div markdown="block" class="home-grid">
-<div markdown="block">
+* **Input:** It accepts `workflow.json` files defined by the PWD standard.
 
-### Tutorial
+* **Mapping:** It maps PWD nodes and edges to NOMAD's internal `Workflow` and `Task` schema.
 
-TODO
+* **Validation:** It utilizes the upstream library to ensure schema compatibility.
 
-- [Tutorial](tutorial/tutorial.md)
+## Key Features & Functionality
 
-</div>
-<div markdown="block">
+### A. Smart Graph Simplification
+Raw PWD graphs often contain many "utility" nodes (e.g., parameter setters, getters) that clutter the visualization. This plugin implements a **Smart Graph Simplification** strategy using `networkx`:
 
-### How-to guides
+* **Scientific Tasks:** Nodes that generate files (possess a `working_directory`) or act as topological "Hubs" (high connectivity) remain at the top level.
 
-How-to guides provide step-by-step instructions for a wide range of tasks, with the overarching topics:
+* **Utility Functions:** Low-level helper nodes are automatically grouped into a nested sub-workflow named "Utility Functions," ensuring the user sees a clean, high-level view of the scientific process.
 
-- [Install this plugin](how_to/install_this_plugin.md)
-- [Use this plugin](how_to/use_this_plugin.md)
-- [Contribute to this plugin](how_to/contribute_to_this_plugin.md)
-- [Contribute to the documentation](how_to/contribute_to_the_documentation.md)
+### B. Data Linking & Path Resolution
+The plugin extends the schema to make the graph interactive:
 
-</div>
+* **Schema Extension:** Adds `working_directory` and `output` fields to capture execution context.
 
-<div markdown="block">
+* **Active Linking:** It resolves absolute paths found in the JSON (e.g., `/home/cluster/...`) relative to the NOMAD upload directory. If a simulation file (e.g., `.out`, `.xml`) is found, the graph node becomes a clickable **TaskReference** linking directly to the data entry.
 
-### Explanation
+### C. Robust Parsing
+The parser uses a robust detection mechanism (scanning for `"nodes": [...]`) to identify PWD files. This ensures reliable ingestion even during streaming uploads where standard JSON parsing might fail on partial buffers.
 
-The explanation [section](explanation/explanation.md) provides background knowledge on this plugin.
+## Demo & Usage
 
-</div>
-<div markdown="block">
+To demonstrate the plugin functionality:
 
-### Reference
+### Prerequisites
+A valid upload must contain the following "Companion Files":
+* `workflow.json` (The graph structure)
+* `workflow.py` (The Python script definition)
+* `environment.yaml` (Dependency definition)
 
-The reference [section](reference/references.md) includes all CLI commands and arguments, all configuration options,
-the possible schema annotations and their arguments, and a glossary of used terms.
-
-</div>
-</div>
+### Verification Steps
+1.  **Start the GUI:** Run your local NOMAD instance and navigate to the UI.
+2.  **Upload:** Create a new upload and drop the example files (e.g., files in `tests/data/data_export/`).
+3.  **Visual Verification:**
+    * **Graph View:** Open the Workflow entry. You should see a simplified graph where utility nodes are hidden.
+    * **Data Links:** Click on a compute node. If the `working_directory` contains output files, NOMAD will navigate you to that specific file entry.
