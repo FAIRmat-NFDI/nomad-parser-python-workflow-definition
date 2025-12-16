@@ -1,0 +1,1 @@
+The three files `workflow.json`, `workflow.py`, and `environment.yaml` are mock files created to test features. The `test_upload.zip` file contains the same three files plus the fake directories containing test simulation files to test the linking-task-to-data branch and see if nomad can link the task to the directories/entries. 
