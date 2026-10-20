@@ -389,6 +389,7 @@ class PythonWorkflowDefinitionParser(MatchingParser):
                     # KEEP CONNECTIONS: Copy inputs/outputs from the original task
                     task_ref.inputs = task.inputs
                     task_ref.outputs = task.outputs
+                    task_ref.section = task.section
 
                     final_tasks.append(task_ref)
                     found_reference = True
@@ -454,14 +455,15 @@ class PythonWorkflowDefinitionParser(MatchingParser):
                 # Load into the NOMAD section
                 workflow.load_from_pydantic_model(data)
 
-                # Resolve links to other entries
-                self._resolve_task_references(workflow, mainfile, archive, logger)
-
                 # Set the workflow in the archive
                 archive.workflow2 = workflow
 
-                # Trigger normalization
+                # Group utility calls while all PWD task metadata is still present.
                 workflow.normalize(archive, logger)
+
+                # Resolve top-level execution tasks only after grouping. Replacing
+                # tasks first would discard the PWD fields used for classification.
+                self._resolve_task_references(workflow, mainfile, archive, logger)
 
                 logger.info('Successfully created Python Workflow Definition from JSON')
 

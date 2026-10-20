@@ -19,7 +19,6 @@
 import logging
 from typing import Any
 
-import networkx as nx
 from nomad.datamodel.data import ArchiveSection
 from nomad.datamodel.metainfo.workflow import Link, Task, Workflow
 from nomad.metainfo import JSON, Package, Quantity, Section, SubSection
@@ -27,6 +26,7 @@ from nomad.metainfo import JSON, Package, Quantity, Section, SubSection
 logger = logging.getLogger(__name__)
 
 m_package = Package(name='python_workflow_definition')
+UTILITY_WORKFLOW_PREFIX = 'Utility Functions'
 
 
 class WorkflowAuthor(ArchiveSection):
@@ -77,6 +77,30 @@ class WorkflowExecutionEnvironment(ArchiveSection):
     )
 
 
+class PythonFunctionSource(ArchiveSection):
+    """Source metadata inferred from a PWD ``module.function`` value."""
+
+    m_def = Section(validate=False)
+
+    module = Quantity(
+        type=str,
+        description='Python module containing the function.',
+    )
+
+    function_name = Quantity(
+        type=str,
+        description='Name of the Python function within the module.',
+    )
+
+    source_path = Quantity(
+        type=str,
+        description=(
+            'Inferred path to the Python source file. The path is metadata only and '
+            'does not imply that the file is present in the upload.'
+        ),
+    )
+
+
 class PythonWorkflowDefinitionNode(ArchiveSection):
     """
     Section representing a single node from the original PWD workflow definition.
@@ -107,6 +131,13 @@ class PythonWorkflowDefinitionNode(ArchiveSection):
             'the input value. For function nodes, this contains the function '
             'specification. For output nodes, this may be empty or contain '
             'placeholder information.'
+        ),
+    )
+
+    function_source = SubSection(
+        sub_section=PythonFunctionSource,
+        description=(
+            'Source module, function, and inferred file path for function nodes.'
         ),
     )
 
@@ -305,7 +336,7 @@ class PythonWorkflowDefinition(Workflow):
         # Helper to flatten the task list
         all_tasks = []
         for task in self.tasks:
-            if getattr(task, 'name', '') == 'Utility Functions':
+            if self._is_utility_workflow(task):
                 all_tasks.extend(task.tasks)
             else:
                 all_tasks.append(task)
@@ -321,124 +352,255 @@ class PythonWorkflowDefinition(Workflow):
         # We must count tasks in the main workflow AND the utility sub-workflow
         count = 0
         for task in self.tasks:
-            if getattr(task, 'name', '') == 'Utility Functions':
+            if self._is_utility_workflow(task):
                 count += len(task.tasks)
             else:
                 count += 1
         return count
+
+    @staticmethod
+    def _is_utility_workflow(task) -> bool:
+        """Return whether a task is one of the generated utility workflows."""
+        return getattr(task, 'name', '').startswith(UTILITY_WORKFLOW_PREFIX)
 
     def normalize(self, archive, logger):
         """
         Normalize the Python workflow definition.
 
         This method processes the workflow definition and creates appropriate
-        NOMAD workflow structures. It uses graph topology to identify
-        'Main' tasks vs 'Utility' tasks.
+        NOMAD workflow structures. Tasks with an explicit ``working_directory``
+        input are execution tasks; all other Python calls are grouped as utilities.
         """
         super().normalize(archive, logger)
 
         if not self.tasks:
             return
 
-        # IDEMPOTENCY CHECK: 
+        # IDEMPOTENCY CHECK:
         # If we have already grouped the tasks, do not do it again.
         # This prevents the double-run crash.
-        if any(getattr(t, 'name', '') == 'Utility Functions' for t in self.tasks):
+        if any(self._is_utility_workflow(task) for task in self.tasks):
             return
 
-        # Build graph to understand topology
-        graph = self._build_task_graph()
+        # Classify tasks into execution tasks and Python utility calls.
+        _, utility_tasks = self._classify_tasks()
 
-        # Classify tasks into Main (keep) and Utility (hide)
-        main_tasks, utility_tasks = self._classify_tasks(graph, logger)
-
-        # Create sub-workflow if needed
+        # Create one sub-workflow for each connected utility component.
         if utility_tasks:
-            self._create_utility_subworkflow(main_tasks, utility_tasks, logger)
+            self._create_utility_subworkflows(utility_tasks, logger)
 
-    def _build_task_graph(self) -> nx.DiGraph:
-        """Construct a directed graph representing task dependencies."""
-        graph = nx.DiGraph()
-
-        # Map sections back to tasks for edge construction
-        # (We need to know which Task owns a specific Input/Output section)
-        section_to_task_map = {}
-        for task in self.tasks:
-            # SAFETY CHECK: Only process tasks that have a node_id
-            node_id = getattr(task, 'node_id', None)
-            if node_id is None:
-                continue
-
-            graph.add_node(task.node_id, obj=task)
-            section_to_task_map[task] = task.node_id
-
-            # Map output sections to their parent task
-            for output in task.outputs:
-                if output.section:
-                    section_to_task_map[output.section] = task.node_id
-
-        # Add Edges based on connections
-        for task in self.tasks:
-            # Skip tasks without IDs here too
-            target_node_id = getattr(task, 'node_id', None)
-            if target_node_id is None:
-                continue
-            
-            for input_link in task.inputs:
-                if input_link.section:
-                    source_node_id = section_to_task_map.get(input_link.section)
-                    # Add edge if connection exists and is not a self-loop
-                    if source_node_id is not None and source_node_id != target_node_id:
-                        graph.add_edge(source_node_id, target_node_id)
-        return graph
-
-    def _classify_tasks(self, graph: nx.DiGraph, logger) -> tuple[list, list]:
-        """Separate tasks into main and utility based on heuristics."""
+    def _classify_tasks(self) -> tuple[list, list]:
+        """Separate external executions from in-process Python utility calls."""
         main_tasks = []
         utility_tasks = []
 
-        # Heuristic Configuration
-        degree_hub_threshold = 4
-        degrees = dict(graph.degree())
-
         for task in self.tasks:
-            is_main = False
+            has_working_directory_input = any(
+                getattr(input_link, 'name', None) == 'working_directory'
+                for input_link in task.inputs
+            )
 
-            # Criterion 1: Data Producer (Simulation / Heavy computation)
-            # Checks if the task created a physical directory/files
-            if hasattr(task, 'working_directory') and task.working_directory:
-                is_main = True
-
-            # Criterion 2: Structural Hub
-            # If a task connects many other tasks, it is structurally significant
-            elif degrees.get(task.node_id, 0) > degree_hub_threshold:
-                is_main = True
-                logger.info(
-                    f'Task {task.name} kept as Main (Hub detected, '
-                    f'Degree: {degrees.get(task.node_id)})'
-                )
-
-            if is_main:
+            if has_working_directory_input:
                 main_tasks.append(task)
             else:
                 utility_tasks.append(task)
 
         return main_tasks, utility_tasks
 
-    def _create_utility_subworkflow(self, main_tasks, utility_tasks, logger):
-        """Move utility tasks into a dedicated sub-workflow."""
+    def _create_utility_subworkflows(self, utility_tasks, logger):
+        """Group directly connected utility tasks into ordered sub-workflows.
+
+        Connectivity is evaluated on the utility-only induced graph. Direction is
+        ignored for component membership, which keeps forks and joins together while
+        calculations separate utility stages. Components and tasks use a stable
+        topological order; source order breaks ties and is the fallback for cycles.
+        """
+        original_tasks = list(self.tasks)
+        components = self._find_utility_components(original_tasks, utility_tasks)
+        producers, consumers = self._build_section_flow_maps(original_tasks)
+        task_order = self._get_topological_task_order(original_tasks, producers)
+        order_position = {
+            task_index: position for position, task_index in enumerate(task_order)
+        }
+        components = [
+            sorted(component, key=order_position.get) for component in components
+        ]
+        components.sort(key=lambda component: order_position[component[0]])
+        workflow_output_sections = {
+            id(link.section) for link in self.outputs if link.section is not None
+        }
+
+        utility_indices = {
+            index
+            for index, task in enumerate(original_tasks)
+            if any(task is utility_task for utility_task in utility_tasks)
+        }
+        workflows_by_first_index = {}
+
+        for number, component in enumerate(components, start=1):
+            inputs, outputs = self._get_component_boundary_links(
+                original_tasks,
+                component,
+                producers,
+                consumers,
+                workflow_output_sections,
+            )
+            utility_workflow = Workflow(
+                name=f'{UTILITY_WORKFLOW_PREFIX} #{number}',
+                tasks=[original_tasks[index] for index in component],
+                inputs=inputs,
+                outputs=outputs,
+            )
+            workflows_by_first_index[component[0]] = utility_workflow
+
         logger.info(
-            f'Grouping {len(utility_tasks)} utility tasks into a sub-workflow '
-            f'(Graph based simplification).'
+            f'Grouped {len(utility_tasks)} utility tasks into '
+            f'{len(components)} connected sub-workflows.'
         )
 
-        utility_sub_workflow = Workflow(
-            name='Utility Functions',
-            tasks=utility_tasks,
-        )
+        ordered_tasks = []
+        for index in task_order:
+            task = original_tasks[index]
+            if index in workflows_by_first_index:
+                ordered_tasks.append(workflows_by_first_index[index])
+            elif index not in utility_indices:
+                ordered_tasks.append(task)
+        self.tasks = ordered_tasks
 
-        # Update the Main Workflow structure
-        self.tasks = main_tasks + [utility_sub_workflow]
+    @staticmethod
+    def _build_section_flow_maps(tasks):
+        """Map linked archive sections to their producing and consuming tasks."""
+        producers = {}
+        consumers = {}
+
+        for index, task in enumerate(tasks):
+            for output in task.outputs:
+                if output.section is not None:
+                    producers.setdefault(id(output.section), []).append(index)
+            for input_link in task.inputs:
+                if input_link.section is not None:
+                    consumers.setdefault(id(input_link.section), []).append(index)
+
+        return producers, consumers
+
+    @staticmethod
+    def _get_topological_task_order(tasks, producers) -> list[int]:
+        """Return a stable dependency order, falling back to source order on cycles."""
+        successors = {index: set() for index in range(len(tasks))}
+        indegree = {index: 0 for index in range(len(tasks))}
+
+        for target_index, task in enumerate(tasks):
+            for input_link in task.inputs:
+                if input_link.section is None:
+                    continue
+                for source_index in producers.get(id(input_link.section), []):
+                    if (
+                        source_index != target_index
+                        and target_index not in successors[source_index]
+                    ):
+                        successors[source_index].add(target_index)
+                        indegree[target_index] += 1
+
+        ready = sorted(index for index, degree in indegree.items() if degree == 0)
+        ordered = []
+        while ready:
+            index = ready.pop(0)
+            ordered.append(index)
+            for successor in sorted(successors[index]):
+                indegree[successor] -= 1
+                if indegree[successor] == 0:
+                    ready.append(successor)
+                    ready.sort()
+
+        if len(ordered) != len(tasks):
+            ordered.extend(index for index in range(len(tasks)) if index not in ordered)
+
+        return ordered
+
+    def _find_utility_components(self, tasks, utility_tasks) -> list[list[int]]:
+        """Find weakly connected components in the utility-only task graph."""
+        utility_indices = {
+            index
+            for index, task in enumerate(tasks)
+            if any(task is utility_task for utility_task in utility_tasks)
+        }
+        producers, _ = self._build_section_flow_maps(tasks)
+        adjacency = {index: set() for index in utility_indices}
+
+        for target_index in utility_indices:
+            for input_link in tasks[target_index].inputs:
+                if input_link.section is None:
+                    continue
+                for source_index in producers.get(id(input_link.section), []):
+                    if source_index in utility_indices and source_index != target_index:
+                        adjacency[source_index].add(target_index)
+                        adjacency[target_index].add(source_index)
+
+        components = []
+        remaining = set(utility_indices)
+        while remaining:
+            start = min(remaining)
+            stack = [start]
+            component = []
+            remaining.remove(start)
+
+            while stack:
+                index = stack.pop()
+                component.append(index)
+                neighbours = sorted(adjacency[index] & remaining, reverse=True)
+                for neighbour in neighbours:
+                    remaining.remove(neighbour)
+                    stack.append(neighbour)
+
+            components.append(sorted(component))
+
+        return components
+
+    def _get_component_boundary_links(
+        self,
+        tasks,
+        component,
+        producers,
+        consumers,
+        workflow_output_sections,
+    ):
+        """Create parent-level links where a utility component crosses its boundary."""
+        component_indices = set(component)
+        inputs = []
+        outputs = []
+        seen_inputs = set()
+        seen_outputs = set()
+
+        for index in component:
+            task = tasks[index]
+            for input_link in task.inputs:
+                section = input_link.section
+                if section is None:
+                    continue
+                section_id = id(section)
+                section_producers = producers.get(section_id, [])
+                is_external = not section_producers or any(
+                    producer not in component_indices
+                    for producer in section_producers
+                )
+                if is_external and section_id not in seen_inputs:
+                    inputs.append(Link(name=input_link.name, section=section))
+                    seen_inputs.add(section_id)
+
+            for output in task.outputs:
+                section = output.section
+                if section is None:
+                    continue
+                section_id = id(section)
+                is_external = section_id in workflow_output_sections or any(
+                    consumer not in component_indices
+                    for consumer in consumers.get(section_id, [])
+                )
+                if is_external and section_id not in seen_outputs:
+                    outputs.append(Link(name=output.name, section=section))
+                    seen_outputs.add(section_id)
+
+        return inputs, outputs
 
     def _create_nomad_workflow_structure(self, nodes, edges):
         """
@@ -478,6 +640,11 @@ class PythonWorkflowDefinition(Workflow):
             else:
                 node_section.value = None
 
+            if node.get('type') == 'function':
+                node_section.function_source = self._infer_function_source(
+                    node.get('value')
+                )
+
             self.pwd_nodes.append(node_section)
 
             # Add to workflow-level inputs/outputs based on node type
@@ -485,6 +652,22 @@ class PythonWorkflowDefinition(Workflow):
                 self.inputs.append(Link(name=node_section.name, section=node_section))
             elif node.get('type') == 'output':
                 self.outputs.append(Link(name=node_section.name, section=node_section))
+
+    @staticmethod
+    def _infer_function_source(module_function) -> PythonFunctionSource | None:
+        """Infer source metadata from a ``module.function`` identifier."""
+        if not isinstance(module_function, str) or '.' not in module_function:
+            return None
+
+        module, function_name = module_function.rsplit('.', 1)
+        if not module or not function_name:
+            return None
+
+        source = PythonFunctionSource()
+        source.module = module
+        source.function_name = function_name
+        source.source_path = f'{module.replace(".", "/")}.py'
+        return source
 
     def _create_function_tasks_with_pwd_nodes(self, nodes, edges):
         """Create tasks for function nodes with connections to PWD nodes."""
@@ -553,6 +736,12 @@ class PythonWorkflowDefinition(Workflow):
             node_id=node_id,
             module_function=node.get('value'),
         )
+
+        # Task.section is NOMAD's standard link from a workflow task to the
+        # archive section that describes what was executed.
+        pwd_node = node_to_pwd_node.get(node_id)
+        if pwd_node and pwd_node.function_source:
+            task.section = pwd_node.function_source
 
         # Extract new fields directly from the JSON node dictionary
         if 'working_directory' in node:
@@ -813,7 +1002,7 @@ class PythonWorkflowDefinition(Workflow):
             # Flatten the task list to find all function nodes
             all_tasks = []
             for task in self.tasks:
-                if getattr(task, 'name', '') == 'Utility Functions':
+                if self._is_utility_workflow(task):
                     all_tasks.extend(task.tasks)
                 else:
                     all_tasks.append(task)
