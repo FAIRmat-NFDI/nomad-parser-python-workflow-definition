@@ -383,7 +383,12 @@ class PythonWorkflowDefinition(Workflow):
             return
 
         # Classify tasks into execution tasks and Python utility calls.
-        _, utility_tasks = self._classify_tasks()
+        execution_tasks, utility_tasks = self._classify_tasks()
+
+        # "Utility" is meaningful only relative to an external execution stage.
+        # Pure Python workflows should retain their original top-level graph.
+        if not execution_tasks:
+            return
 
         # Create one sub-workflow for each connected utility component.
         if utility_tasks:

@@ -894,7 +894,7 @@ def test_function_tasks_link_to_inferred_source(parser, test_data_path):
         assert tasks_by_id[node.node_id].section is source
 
 
-def test_task_reference_resolution(tmp_path):
+def test_task_reference_resolution(tmp_path, monkeypatch):
     """
     Test that _resolve_task_references correctly:
     1. Handles absolute paths (strips them).
@@ -924,9 +924,10 @@ def test_task_reference_resolution(tmp_path):
     task.working_directory = '/home/user/absolute/path/to/mock_calc'
 
     # Add some dummy inputs/outputs to ensure they are preserved
-    # Note: In a real scenario these would be Link objects, but for this test
-    # simply checking that the list content is preserved is enough.
-    task.inputs = []
+    working_directory = PythonWorkflowDefinitionNode(
+        name='working_directory', value={'data': 'mock_calc'}
+    )
+    task.inputs = [Link(name='working_directory', section=working_directory)]
     task.outputs = []
 
     workflow.tasks.append(task)
@@ -939,6 +940,11 @@ def test_task_reference_resolution(tmp_path):
     # 4. Run the resolution
     parser = PythonWorkflowDefinitionParser()
     logger = MagicMock()
+    monkeypatch.setattr(
+        parser,
+        'find_mainfile_in_directory',
+        lambda directory, logger: 'pw.out',
+    )
 
     parser._resolve_task_references(workflow, mainfile_path, mock_archive, logger)
 
@@ -960,6 +966,43 @@ def test_task_reference_resolution(tmp_path):
     # MProxy objects string representation wraps the value (e.g. MProxy(value))
     # We check if the expected link is inside the string representation
     assert expected_link in str(result_task.task)
+
+
+def test_find_mainfile_is_inferred_from_parser_matching(tmp_path, monkeypatch):
+    """NOMAD parser matching, not filename conventions, identifies an entry."""
+    from nomad.parsing import parsers
+
+    (tmp_path / 'ignored.out').write_text('unmatched output')
+    (tmp_path / 'calculation.result').write_text('matched calculation output')
+
+    def mock_match_parser(path):
+        if Path(path).name == 'calculation.result':
+            return MagicMock(), None
+        return None, None
+
+    monkeypatch.setattr(parsers, 'match_parser', mock_match_parser)
+
+    parser = PythonWorkflowDefinitionParser()
+    assert parser.find_mainfile_in_directory(str(tmp_path)) == 'calculation.result'
+
+    (tmp_path / 'calculation.result').unlink()
+    assert parser.find_mainfile_in_directory(str(tmp_path)) is None
+
+
+def test_find_mainfile_rejects_ambiguous_directory(tmp_path, monkeypatch):
+    """The graph must be extended before choosing between multiple NOMAD entries."""
+    from nomad.parsing import parsers
+
+    (tmp_path / 'first.data').write_text('first')
+    (tmp_path / 'second.data').write_text('second')
+    monkeypatch.setattr(
+        parsers, 'match_parser', lambda path: (MagicMock(), None)
+    )
+
+    logger = MagicMock()
+    parser = PythonWorkflowDefinitionParser()
+    assert parser.find_mainfile_in_directory(str(tmp_path), logger) is None
+    logger.warning.assert_called_once()
 
 
 @pytest.mark.parametrize('example_name', ['data_export', 'quantum_espresso'])
@@ -1040,8 +1083,36 @@ def test_workflow_simplification(parser, test_data_path, example_name):
     ]
 
 
-def test_reference_resolution_after_utility_grouping(parser, test_data_path, tmp_path):
+def test_pure_python_workflow_is_not_grouped_as_utilities(parser, test_data_path):
+    """Without an execution anchor, function tasks remain at the top level."""
+    archive = EntryArchive()
+    parser.parse(str(test_data_path / 'arithmetic' / 'workflow.json'), archive, None)
+
+    assert len(archive.workflow2.tasks) == ARITHMETIC_FUNCTIONS
+    assert all(
+        not task.name.startswith('Utility Functions')
+        for task in archive.workflow2.tasks
+    )
+    assert all(
+        isinstance(task, PythonWorkflowDefinitionTask)
+        for task in archive.workflow2.tasks
+    )
+
+
+def test_reference_resolution_after_utility_grouping(
+    parser, test_data_path, tmp_path, monkeypatch
+):
     """Resolved calculation entries do not break utility classification."""
+    from nomad.parsing import parsers
+
+    monkeypatch.setattr(
+        parsers,
+        'match_parser',
+        lambda path: (MagicMock(), None)
+        if Path(path).name == 'pw.out'
+        else (None, None),
+    )
+
     source_dir = test_data_path / 'data_export'
     for filename in ('workflow.json', 'workflow.py', 'environment.yaml'):
         (tmp_path / filename).write_bytes((source_dir / filename).read_bytes())

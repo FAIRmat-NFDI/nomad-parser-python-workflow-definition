@@ -28,7 +28,7 @@ The plugin extends the schema to make the graph interactive:
 
 * **Schema Extension:** Adds `working_directory` and `output` fields to capture execution context.
 
-* **Active Linking:** It resolves absolute paths found in the JSON (e.g., `/home/cluster/...`) relative to the NOMAD upload directory. If a simulation file (e.g., `.out`, `.xml`) is found, the graph node becomes a clickable **TaskReference** linking directly to the data entry.
+* **Active Linking:** Execution tasks and their directories are inferred from the PWD graph. A graph node becomes a clickable **TaskReference** only when NOMAD's configured parser registry identifies exactly one entry-producing file in that directory; the PWD parser does not interpret filename extensions.
 
 ### C. Robust Parsing
 The parser uses a robust detection mechanism (scanning for `"nodes": [...]`) to identify PWD files. This ensures reliable ingestion even during streaming uploads where standard JSON parsing might fail on partial buffers.
