@@ -768,7 +768,12 @@ class PythonWorkflowDefinition(Workflow):
         )
         # Helper to find outputs (Passing 'nodes' correctly now)
         self._add_task_outputs(
-            task, nodes, node_id, edges, output_port_values, node_to_pwd_node
+            task,
+            nodes=nodes,
+            node_id=node_id,
+            edges=edges,
+            output_port_values=output_port_values,
+            node_to_pwd_node=node_to_pwd_node,
         )
 
         self.tasks.append(task)
@@ -794,7 +799,14 @@ class PythonWorkflowDefinition(Workflow):
                 task.inputs.append(Link(name=target_port, section=source_section))
 
     def _add_task_outputs(  # noqa: PLR0913
-        self, task, nodes, node_id, edges, output_port_values, node_to_pwd_node
+        self,
+        task,
+        *,
+        nodes,
+        node_id,
+        edges,
+        output_port_values,
+        node_to_pwd_node,
     ):
         """Find edges originating from this node and add them as outputs."""
         for edge in edges:
