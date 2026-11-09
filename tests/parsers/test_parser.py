@@ -21,12 +21,13 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from nomad.datamodel import EntryArchive
-from nomad.datamodel.metainfo.workflow import TaskReference
+from nomad.datamodel import EntryArchive, EntryMetadata
+from nomad.datamodel.metainfo.workflow import Link, TaskReference
 
 from nomad_parser_pwd.parsers.parser import PythonWorkflowDefinitionParser
 from nomad_parser_pwd.schema_packages.pwd import (
     PythonWorkflowDefinition,
+    PythonWorkflowDefinitionNode,
     PythonWorkflowDefinitionTask,
 )
 
@@ -44,6 +45,9 @@ NFDI_FUNCTIONS = 6
 QE_NODES = 33
 QE_MIN_EDGES = 20
 QE_MIN_FUNCTIONS = 10
+QE_EXECUTION_TASKS = 6
+QE_UTILITY_TASKS = 11
+QE_UTILITY_GROUP_SIZES = [2, 6, 3]
 
 
 @pytest.fixture(scope='module')
@@ -61,11 +65,11 @@ def test_data_path():
 def get_all_tasks(workflow):
     """
     Helper to return a flat list of all tasks, including those inside
-    the 'Utility Functions' sub-workflow.
+    generated 'Utility Functions' sub-workflows.
     """
     all_tasks = []
     for task in workflow.tasks:
-        if getattr(task, 'name', '') == 'Utility Functions':
+        if getattr(task, 'name', '').startswith('Utility Functions'):
             all_tasks.extend(task.tasks)
         else:
             all_tasks.append(task)
@@ -865,7 +869,32 @@ def test_parsing_new_quantities(parser, test_data_path):
     )
 
 
-def test_task_reference_resolution(tmp_path):
+def test_function_tasks_link_to_inferred_source(parser, test_data_path):
+    """Function tasks link to source metadata stored inside the archive."""
+    workflow_json_path = test_data_path / 'data_export' / 'workflow.json'
+    archive = EntryArchive()
+
+    parser.parse(str(workflow_json_path), archive, None)
+    workflow = archive.workflow2
+
+    function_nodes = [
+        node for node in workflow.pwd_nodes if node.node_type == 'function'
+    ]
+    tasks_by_id = {task.node_id: task for task in get_all_tasks(workflow)}
+
+    assert function_nodes
+    for node in function_nodes:
+        module_function = node.value['data']
+        module, function_name = module_function.rsplit('.', 1)
+        source = node.function_source
+
+        assert source.module == module
+        assert source.function_name == function_name
+        assert source.source_path == f'{module.replace(".", "/")}.py'
+        assert tasks_by_id[node.node_id].section is source
+
+
+def test_task_reference_resolution(tmp_path, monkeypatch):
     """
     Test that _resolve_task_references correctly:
     1. Handles absolute paths (strips them).
@@ -895,9 +924,10 @@ def test_task_reference_resolution(tmp_path):
     task.working_directory = '/home/user/absolute/path/to/mock_calc'
 
     # Add some dummy inputs/outputs to ensure they are preserved
-    # Note: In a real scenario these would be Link objects, but for this test
-    # simply checking that the list content is preserved is enough.
-    task.inputs = []
+    working_directory = PythonWorkflowDefinitionNode(
+        name='working_directory', value={'data': 'mock_calc'}
+    )
+    task.inputs = [Link(name='working_directory', section=working_directory)]
     task.outputs = []
 
     workflow.tasks.append(task)
@@ -910,6 +940,11 @@ def test_task_reference_resolution(tmp_path):
     # 4. Run the resolution
     parser = PythonWorkflowDefinitionParser()
     logger = MagicMock()
+    monkeypatch.setattr(
+        parser,
+        'find_mainfile_in_directory',
+        lambda directory, logger: 'pw.out',
+    )
 
     parser._resolve_task_references(workflow, mainfile_path, mock_archive, logger)
 
@@ -932,14 +967,50 @@ def test_task_reference_resolution(tmp_path):
     # We check if the expected link is inside the string representation
     assert expected_link in str(result_task.task)
 
-def test_workflow_simplification(parser, test_data_path):
+
+def test_find_mainfile_is_inferred_from_parser_matching(tmp_path, monkeypatch):
+    """NOMAD parser matching, not filename conventions, identifies an entry."""
+    from nomad.parsing import parsers
+
+    (tmp_path / 'ignored.out').write_text('unmatched output')
+    (tmp_path / 'calculation.result').write_text('matched calculation output')
+
+    def mock_match_parser(path):
+        if Path(path).name == 'calculation.result':
+            return MagicMock(), None
+        return None, None
+
+    monkeypatch.setattr(parsers, 'match_parser', mock_match_parser)
+
+    parser = PythonWorkflowDefinitionParser()
+    assert parser.find_mainfile_in_directory(str(tmp_path)) == 'calculation.result'
+
+    (tmp_path / 'calculation.result').unlink()
+    assert parser.find_mainfile_in_directory(str(tmp_path)) is None
+
+
+def test_find_mainfile_rejects_ambiguous_directory(tmp_path, monkeypatch):
+    """The graph must be extended before choosing between multiple NOMAD entries."""
+    from nomad.parsing import parsers
+
+    (tmp_path / 'first.data').write_text('first')
+    (tmp_path / 'second.data').write_text('second')
+    monkeypatch.setattr(
+        parsers, 'match_parser', lambda path: (MagicMock(), None)
+    )
+
+    logger = MagicMock()
+    parser = PythonWorkflowDefinitionParser()
+    assert parser.find_mainfile_in_directory(str(tmp_path), logger) is None
+    logger.warning.assert_called_once()
+
+
+@pytest.mark.parametrize('example_name', ['data_export', 'quantum_espresso'])
+def test_workflow_simplification(parser, test_data_path, example_name):
     """
-    Test that the workflow graph is simplified by grouping utility tasks
-    (tasks without working_directory AND low connectivity) into a
-    'Utility Functions' sub-workflow.
+    Keep QE executions at the top level and group all in-process Python calls.
     """
-    # Locate the file (using data_export as it contains the working_directory fields)
-    workflow_json_path = test_data_path / 'data_export' / 'workflow.json'
+    workflow_json_path = test_data_path / example_name / 'workflow.json'
 
     # Safety check consistent with other tests
     if not workflow_json_path.exists():
@@ -957,64 +1028,199 @@ def test_workflow_simplification(parser, test_data_path):
     # 1. Inspect the Top-Level Tasks
     top_level_tasks = workflow.tasks
 
-    # Identify the sub-workflow
-    utility_workflows = [t for t in top_level_tasks if t.name == 'Utility Functions']
-
-    assert len(utility_workflows) == 1, (
-        f"Expected 1 'Utility Functions' sub-workflow, found {len(utility_workflows)}"
-    )
-
-    # Identify Main Tasks at top level
-    main_tasks = [t for t in top_level_tasks if t.name != 'Utility Functions']
-
-    # We identify "Hubs" by name here based on the known dataset topology.
-    # In this dataset, 'get_list' and 'generate_structures' are high-degree nodes.
-    known_hubs = [
-        'Function python_workflow_definition.shared.get_list',
-        'Function workflow.generate_structures',
+    utility_workflows = [
+        task
+        for task in top_level_tasks
+        if task.name.startswith('Utility Functions')
     ]
 
+    assert [workflow.name for workflow in utility_workflows] == [
+        'Utility Functions #1',
+        'Utility Functions #2',
+        'Utility Functions #3',
+    ]
+    assert [len(workflow.tasks) for workflow in utility_workflows] == (
+        QE_UTILITY_GROUP_SIZES
+    )
+
+    # Identify QE execution tasks at top level.
+    main_tasks = [
+        task
+        for task in top_level_tasks
+        if not task.name.startswith('Utility Functions')
+    ]
+
+    assert len(main_tasks) == QE_EXECUTION_TASKS
     for task in main_tasks:
-        # Check if it is a file producer
-        has_files = hasattr(task, 'working_directory') and task.working_directory
+        assert task.module_function == 'workflow.calculate_qe'
+        assert any(link.name == 'working_directory' for link in task.inputs)
 
-        # Check if it is a known hub
-        is_hub = task.name in known_hubs
+    utility_tasks = [
+        task for workflow in utility_workflows for task in workflow.tasks
+    ]
+    assert len(utility_tasks) == QE_UTILITY_TASKS
+    for task in utility_tasks:
+        assert task.module_function != 'workflow.calculate_qe'
+        assert not any(link.name == 'working_directory' for link in task.inputs)
 
-        assert has_files or is_hub, (
-            f"Top level task '{task.name}' is neither a file producer nor a known Hub. "
-            f'It should have been moved to Utility Functions.'
-        )
+    utility_names = {task.module_function for task in utility_tasks}
+    assert 'workflow.generate_structures' in utility_names
+    assert 'workflow.plot_energy_volume_curve' in utility_names
+    assert 'python_workflow_definition.shared.get_list' in utility_names
+    assert 'python_workflow_definition.shared.get_dict' in utility_names
 
-    # 3. Verify Utility Workflow Content
-    utility_workflow = utility_workflows[0]
+    # Boundary links let every collapsed utility group participate in the
+    # top-level graph instead of appearing as a disconnected container.
+    assert all(workflow.inputs for workflow in utility_workflows)
+    assert all(workflow.outputs for workflow in utility_workflows)
 
-    # Check that it contains tasks
-    assert len(utility_workflow.tasks) > 0, 'Utility workflow should not be empty'
+    assert [task.name for task in top_level_tasks] == [
+        'Utility Functions #1',
+        'Function workflow.calculate_qe',
+        'Utility Functions #2',
+        *(['Function workflow.calculate_qe'] * 5),
+        'Utility Functions #3',
+    ]
 
-    # Verify tasks inside are actually utilities
-    for task in utility_workflow.tasks:
-        # Must not have working directory
-        if hasattr(task, 'working_directory'):
-            assert not task.working_directory, (
-                f'Task {task.name} in utility workflow has working_directory'
-            )
 
-        # Must not be a major hub
-        assert task.name not in known_hubs, (
-            f"Hub task '{task.name}' was incorrectly moved to Utility Functions."
-        )
+def test_pure_python_workflow_is_not_grouped_as_utilities(parser, test_data_path):
+    """Without an execution anchor, function tasks remain at the top level."""
+    archive = EntryArchive()
+    parser.parse(str(test_data_path / 'arithmetic' / 'workflow.json'), archive, None)
 
-    # 4. Verify specific counts based on the sample json
-    # (Nodes 0, 1, 2, 4, 5, 8, 10, 12, 14, 16 have working directories -> 10 Main)
-    # (Nodes 3, 6, 7, 9, 11, 13, 15 have null -> 7 Utility)
-    count_main_tasks = 10
-    count_utility_tasks = 7
-    assert len(main_tasks) == count_main_tasks, (
-        f'Expected {count_main_tasks} main tasks (Producers + Hubs),\
-              got {len(main_tasks)}'
+    assert len(archive.workflow2.tasks) == ARITHMETIC_FUNCTIONS
+    assert all(
+        not task.name.startswith('Utility Functions')
+        for task in archive.workflow2.tasks
     )
-    assert len(utility_workflow.tasks) == count_utility_tasks, (
-        f'Expected {count_utility_tasks} utility tasks,\
-              got {len(utility_workflow.tasks)}'
+    assert all(
+        isinstance(task, PythonWorkflowDefinitionTask)
+        for task in archive.workflow2.tasks
     )
+
+
+def test_reference_resolution_after_utility_grouping(
+    parser, test_data_path, tmp_path, monkeypatch
+):
+    """Resolved calculation entries do not break utility classification."""
+    from nomad.parsing import parsers
+
+    monkeypatch.setattr(
+        parsers,
+        'match_parser',
+        lambda path: (MagicMock(), None)
+        if Path(path).name == 'pw.out'
+        else (None, None),
+    )
+
+    source_dir = test_data_path / 'data_export'
+    for filename in ('workflow.json', 'workflow.py', 'environment.yaml'):
+        (tmp_path / filename).write_bytes((source_dir / filename).read_bytes())
+
+    raw_data = json.loads((tmp_path / 'workflow.json').read_text())
+    for node in raw_data['nodes']:
+        if node.get('value') != 'workflow.calculate_qe':
+            continue
+        calculation_dir = tmp_path / Path(node['working_directory']).name
+        calculation_dir.mkdir()
+        (calculation_dir / 'pw.out').write_text('mock Quantum ESPRESSO output')
+
+    archive = EntryArchive(metadata=EntryMetadata(mainfile='workflow.json'))
+    parser.parse(str(tmp_path / 'workflow.json'), archive, None)
+
+    utility_workflows = [
+        task
+        for task in archive.workflow2.tasks
+        if task.name.startswith('Utility Functions')
+    ]
+    calculation_tasks = [
+        task
+        for task in archive.workflow2.tasks
+        if not task.name.startswith('Utility Functions')
+    ]
+
+    assert len(calculation_tasks) == QE_EXECUTION_TASKS
+    assert all(isinstance(task, TaskReference) for task in calculation_tasks)
+    assert [len(workflow.tasks) for workflow in utility_workflows] == (
+        QE_UTILITY_GROUP_SIZES
+    )
+    assert all(task.section is not None for task in calculation_tasks)
+
+
+def test_utility_grouping_preserves_parallel_branches():
+    """Utility components remain separate across parallel execution branches."""
+    raw_input = PythonWorkflowDefinitionNode(name='input')
+    prepared_1 = PythonWorkflowDefinitionNode(name='prepared_1')
+    prepared_2 = PythonWorkflowDefinitionNode(name='prepared_2')
+    result_a = PythonWorkflowDefinitionNode(name='result_a')
+    result_b = PythonWorkflowDefinitionNode(name='result_b')
+    final_a = PythonWorkflowDefinitionNode(name='final_a')
+    final_b = PythonWorkflowDefinitionNode(name='final_b')
+    workdir_a = PythonWorkflowDefinitionNode(name='workdir_a')
+    workdir_b = PythonWorkflowDefinitionNode(name='workdir_b')
+
+    prepare_1 = PythonWorkflowDefinitionTask(
+        name='prepare 1',
+        inputs=[Link(name='input', section=raw_input)],
+        outputs=[Link(name='prepared', section=prepared_1)],
+    )
+    prepare_2 = PythonWorkflowDefinitionTask(
+        name='prepare 2',
+        inputs=[Link(name='prepared', section=prepared_1)],
+        outputs=[Link(name='prepared', section=prepared_2)],
+    )
+    calculation_a = PythonWorkflowDefinitionTask(
+        name='calculation A',
+        inputs=[
+            Link(name='working_directory', section=workdir_a),
+            Link(name='input', section=prepared_2),
+        ],
+        outputs=[Link(name='result', section=result_a)],
+    )
+    calculation_b = PythonWorkflowDefinitionTask(
+        name='calculation B',
+        inputs=[
+            Link(name='working_directory', section=workdir_b),
+            Link(name='input', section=prepared_2),
+        ],
+        outputs=[Link(name='result', section=result_b)],
+    )
+    finish_a = PythonWorkflowDefinitionTask(
+        name='finish A',
+        inputs=[Link(name='result', section=result_a)],
+        outputs=[Link(name='final', section=final_a)],
+    )
+    finish_b = PythonWorkflowDefinitionTask(
+        name='finish B',
+        inputs=[Link(name='result', section=result_b)],
+        outputs=[Link(name='final', section=final_b)],
+    )
+
+    workflow = PythonWorkflowDefinition(
+        tasks=[
+            prepare_1,
+            prepare_2,
+            calculation_a,
+            calculation_b,
+            finish_a,
+            finish_b,
+        ],
+        outputs=[
+            Link(name='final_a', section=final_a),
+            Link(name='final_b', section=final_b),
+        ],
+    )
+    workflow.normalize(EntryArchive(), MagicMock())
+
+    utility_workflows = [
+        task for task in workflow.tasks if task.name.startswith('Utility Functions')
+    ]
+    assert [len(group.tasks) for group in utility_workflows] == [2, 1, 1]
+    assert [len(group.outputs) for group in utility_workflows] == [1, 1, 1]
+    assert [task.name for task in workflow.tasks] == [
+        'Utility Functions #1',
+        'calculation A',
+        'calculation B',
+        'Utility Functions #2',
+        'Utility Functions #3',
+    ]

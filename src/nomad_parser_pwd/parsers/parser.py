@@ -57,33 +57,73 @@ class PythonWorkflowDefinitionParser(MatchingParser):
             mainfile_mime_re=r'application/json',
         )
 
-    def find_mainfile_in_directory(self, directory_path: str) -> str | None:
+    def find_mainfile_in_directory(
+        self, directory_path: str, logger=None
+    ) -> str | None:
         """
-        Scans a directory for valid NOMAD mainfiles.
-        Prioritizes workflows (*.archive.yaml) over raw calculations.
+        Find the unique file in a task directory that NOMAD recognizes.
+
+        The PWD graph determines the execution task and its directory. NOMAD's
+        parser registry determines whether files in that directory become entries;
+        filenames and extensions are deliberately not interpreted here. Multiple
+        matched files are ambiguous and therefore do not produce a reference.
         """
         if not os.path.isdir(directory_path):
             return None
 
         try:
-            files = os.listdir(directory_path)
+            files = sorted(os.listdir(directory_path))
         except Exception:
             return None
 
-        # Priority 1: Look for nested workflows
-        for f in files:
-            if f.endswith('workflow.archive.yaml'):
-                return f
+        from nomad.parsing.parsers import match_parser
 
-        # Priority 2: Look for common simulation outputs
-        # Add more extensions here if needed (e.g., .out for QE, .xml for VASP)
-        common_extensions = ['.out', '.xml', '.json', '.run', '.log', '.wout', '.hdf5']
-        for f in files:
-            for ext in common_extensions:
-                if f.endswith(ext):
-                    return f
+        matched_files = []
+        for filename in files:
+            candidate = os.path.join(directory_path, filename)
+            if not os.path.isfile(candidate):
+                continue
+            parser, _ = match_parser(candidate)
+            if parser is not None:
+                matched_files.append(filename)
 
+        if len(matched_files) == 1:
+            return matched_files[0]
+
+        if len(matched_files) > 1 and logger is not None:
+            logger.warning(
+                f'Cannot infer a unique referenced entry for {directory_path}: '
+                f'NOMAD matched {matched_files}.'
+            )
         return None
+
+    @staticmethod
+    def _get_task_working_directory(task) -> str | None:
+        """Read execution-directory information represented by the PWD task graph."""
+        working_directory_input = next(
+            (
+                input_link
+                for input_link in task.inputs
+                if getattr(input_link, 'name', None) == 'working_directory'
+            ),
+            None,
+        )
+        if working_directory_input is None:
+            return None
+
+        # Exported workflows may record the resolved execution directory directly
+        # on the function node.
+        working_directory = getattr(task, 'working_directory', None)
+        if working_directory:
+            return working_directory
+
+        # Recipe-only workflows carry the directory as the value of the node linked
+        # to the function's working_directory input port.
+        section = working_directory_input.section
+        value = getattr(section, 'value', None) if section is not None else None
+        if isinstance(value, dict):
+            value = value.get('data')
+        return value if isinstance(value, str) and value else None
 
     def is_mainfile(
         self,
@@ -344,8 +384,8 @@ class PythonWorkflowDefinitionParser(MatchingParser):
         final_tasks = []
 
         for task in workflow.tasks:
-            # check if the task has a working_directory
-            work_dir = getattr(task, 'working_directory', None)
+            # The graph input identifies execution tasks and provides their directory.
+            work_dir = self._get_task_working_directory(task)
             found_reference = False
 
             if work_dir:
@@ -357,7 +397,9 @@ class PythonWorkflowDefinitionParser(MatchingParser):
                 target_sys_dir = os.path.join(current_sys_dir, clean_work_dir)
 
                 # Scan for file
-                found_filename = self.find_mainfile_in_directory(target_sys_dir)
+                found_filename = self.find_mainfile_in_directory(
+                    target_sys_dir, logger
+                )
 
                 if found_filename:
                     # Calculate path relative to upload root for LINKING
@@ -389,6 +431,7 @@ class PythonWorkflowDefinitionParser(MatchingParser):
                     # KEEP CONNECTIONS: Copy inputs/outputs from the original task
                     task_ref.inputs = task.inputs
                     task_ref.outputs = task.outputs
+                    task_ref.section = task.section
 
                     final_tasks.append(task_ref)
                     found_reference = True
@@ -454,14 +497,15 @@ class PythonWorkflowDefinitionParser(MatchingParser):
                 # Load into the NOMAD section
                 workflow.load_from_pydantic_model(data)
 
-                # Resolve links to other entries
-                self._resolve_task_references(workflow, mainfile, archive, logger)
-
                 # Set the workflow in the archive
                 archive.workflow2 = workflow
 
-                # Trigger normalization
+                # Group utility calls while all PWD task metadata is still present.
                 workflow.normalize(archive, logger)
+
+                # Resolve top-level execution tasks only after grouping. Replacing
+                # tasks first would discard the PWD fields used for classification.
+                self._resolve_task_references(workflow, mainfile, archive, logger)
 
                 logger.info('Successfully created Python Workflow Definition from JSON')
 
